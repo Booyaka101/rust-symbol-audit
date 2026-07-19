@@ -1,0 +1,10 @@
+# Shell scripts and the action metadata run on the Linux CI runner. They MUST
+# keep LF line endings — a CRLF shebang breaks `#!/usr/bin/env bash` and stray
+# \r bytes cause syntax errors. Force LF regardless of the committer's
+# core.autocrlf setting.
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Default: let Git normalize text files, detect binaries automatically.
+* text=auto

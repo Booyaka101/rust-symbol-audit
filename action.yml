@@ -1,0 +1,79 @@
+name: "rust-symbol-audit"
+description: "On dependency-change PRs, diff v0-demangled Rust symbols between old and new crate versions and flag risky new capabilities (exec, sockets, fs, secrets) as a PR comment."
+author: "booyaka101"
+branding:
+  icon: "shield"
+  color: "orange"
+
+inputs:
+  github-token:
+    description: "Token used to post the PR comment (usually secrets.GITHUB_TOKEN)."
+    required: true
+  max-crates:
+    description: "Skip the audit if more than this many crates changed in Cargo.lock (symbol-diffing every crate is slow)."
+    required: false
+    default: "5"
+
+outputs:
+  changed:
+    description: "Whether any crate versions changed in Cargo.lock."
+    value: ${{ steps.parse.outputs.changed }}
+  tier:
+    description: "Highest risk tier detected (critical|high|medium|none)."
+    value: ${{ steps.audit.outputs.tier }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Ensure Rust toolchain
+      shell: bash
+      run: |
+        if ! command -v cargo >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+        rustc --version
+        cargo --version
+
+    - name: Cache rustfilt + cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/rustfilt
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+        key: rust-symbol-audit-${{ runner.os }}-rustfilt-v1
+
+    - name: Install rustfilt (demangler)
+      shell: bash
+      run: |
+        if ! command -v rustfilt >/dev/null 2>&1; then
+          cargo install rustfilt --quiet
+        fi
+        rustfilt --version || true
+
+    - name: Parse Cargo.lock diff
+      id: parse
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_REF: ${{ github.sha }}
+      run: |
+        "${{ github.action_path }}/scripts/parse_lockdiff.sh" \
+          "$BASE_SHA" "$HEAD_REF" "$RUNNER_TEMP/rsa/lockdiff.tsv"
+
+    - name: Audit symbols & post comment
+      id: audit
+      if: steps.parse.outputs.changed == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        MAX_CRATES: ${{ inputs.max-crates }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        LOCKDIFF_TSV: ${{ runner.temp }}/rsa/lockdiff.tsv
+        WORK: ${{ runner.temp }}/rsa
+      run: |
+        "${{ github.action_path }}/scripts/run_audit.sh"

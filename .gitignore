@@ -1,0 +1,21 @@
+# Rust / Cargo build output (probe crates are built into scratch dirs at runtime)
+target/
+**/target/
+Cargo.lock.bak
+
+# Local test scratch (run_local.sh defaults WORK to D:/tmp/rsa-local, but guard
+# against anyone pointing it at the repo)
+rsa-local/
+/tmp/rsa/
+*.rlib
+*.err
+build.err
+build.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
