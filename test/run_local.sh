@@ -10,7 +10,8 @@ set -uo pipefail
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS="$PROJECT/scripts"
 FIX="$PROJECT/test/fixtures"
-WORK="${WORK:-D:/tmp/rsa-local}"
+# Portable scratch dir: RUNNER_TEMP on CI, else /tmp (works in Git Bash too).
+WORK="${WORK:-${RUNNER_TEMP:-/tmp}/rsa-local}"
 rm -rf "$WORK"; mkdir -p "$WORK"
 
 # --- tool detection ---------------------------------------------------------

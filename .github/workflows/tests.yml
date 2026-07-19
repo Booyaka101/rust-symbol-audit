@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          rustc --version
+          cargo --version
+          nm --version | head -1
+          python3 --version
+
+      - name: Cache cargo registry + rustfilt
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/rustfilt
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: rsa-tests-${{ runner.os }}-rustfilt-v1
+
+      - name: Install rustfilt (demangler)
+        run: command -v rustfilt >/dev/null 2>&1 || cargo install rustfilt --quiet
+
+      - name: Run acceptance suite (48 checks)
+        env:
+          WORK: ${{ runner.temp }}/rsa-local
+        run: bash test/run_local.sh

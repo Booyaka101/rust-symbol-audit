@@ -1,5 +1,6 @@
 # rust-symbol-audit
 
+[![tests](https://github.com/Booyaka101/rust-symbol-audit/actions/workflows/tests.yml/badge.svg)](https://github.com/Booyaka101/rust-symbol-audit/actions/workflows/tests.yml)
 [![Release](https://img.shields.io/github/v/release/Booyaka101/rust-symbol-audit?sort=semver&color=orange)](https://github.com/Booyaka101/rust-symbol-audit/releases)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-rust--symbol--audit-2ea44f?logo=github)](https://github.com/marketplace/actions/rust-symbol-audit)
 [![License: MIT](https://img.shields.io/github/license/Booyaka101/rust-symbol-audit?color=blue)](LICENSE)
