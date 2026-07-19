@@ -10,9 +10,17 @@ inputs:
     description: "Token used to post the PR comment (usually secrets.GITHUB_TOKEN)."
     required: true
   max-crates:
-    description: "Skip the audit if more than this many crates changed in Cargo.lock (symbol-diffing every crate is slow)."
+    description: "Audit at most this many changed crates (the rest are listed as 'not audited'). Symbol-diffing every crate is slow."
     required: false
-    default: "5"
+    default: "10"
+  fail-on:
+    description: "Fail the check when the overall risk tier reaches this level: none|medium|high|critical. Default 'none' = advisory comment only. Set e.g. 'critical' to block merges via branch protection."
+    required: false
+    default: "none"
+  config:
+    description: "Path (repo-relative) to the .rust-symbol-audit.toml config used to allow/ignore known-benign signals."
+    required: false
+    default: ".rust-symbol-audit.toml"
 
 outputs:
   changed:
@@ -21,6 +29,12 @@ outputs:
   tier:
     description: "Highest risk tier detected (critical|high|medium|none)."
     value: ${{ steps.audit.outputs.tier }}
+  flagged:
+    description: "Comma-separated names of crates that had at least one flagged capability."
+    value: ${{ steps.audit.outputs.flagged }}
+  build-script-changes:
+    description: "Number of audited crates whose build script was newly added or changed."
+    value: ${{ steps.audit.outputs.build-script-changes }}
 
 runs:
   using: "composite"
@@ -71,6 +85,8 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         MAX_CRATES: ${{ inputs.max-crates }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        RSA_CONFIG: ${{ inputs.config }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         LOCKDIFF_TSV: ${{ runner.temp }}/rsa/lockdiff.tsv

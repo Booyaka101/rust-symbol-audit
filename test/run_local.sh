@@ -150,6 +150,119 @@ fi
 echo
 
 # ===========================================================================
+echo "### TEST E — source lane: build.rs newly added (netcap 0.2.0 -> 0.3.0)"
+export RSA_FIXTURES="$FIX"          # re-export (TEST D unset it)
+EWORK="$WORK/e"; mkdir -p "$EWORK"
+"$SCRIPTS/inspect_source.sh" netcap 0.2.0 0.3.0 "$EWORK" >/dev/null 2>"$EWORK/e.log"
+echo "  --- source_findings.tsv ---"; sed 's/^/    /' "$EWORK/source_findings.tsv" 2>/dev/null
+have "$EWORK/source_findings.tsv" 'build-script' && ok "build.rs addition detected (symbol lane is blind to this)" \
+  || bad "build.rs not detected"
+ETIER="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["tier"])' "$EWORK/source.json" 2>/dev/null || echo none)"
+[ "$ETIER" = "critical" ] && ok "malicious build.rs (shells out) tiered CRITICAL" || bad "expected critical, got '$ETIER'"
+echo
+
+# ===========================================================================
+echo "### TEST F — source lane: crate becomes a proc-macro (procm 0.1.0 -> 0.2.0)"
+FWORK="$WORK/f"; mkdir -p "$FWORK"
+"$SCRIPTS/inspect_source.sh" procm 0.1.0 0.2.0 "$FWORK" >/dev/null 2>"$FWORK/f.log"
+echo "  --- source_findings.tsv ---"; sed 's/^/    /' "$FWORK/source_findings.tsv" 2>/dev/null
+have "$FWORK/source_findings.tsv" 'proc-macro' && ok "proc-macro transition detected" || bad "proc-macro not detected"
+FTIER="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["tier"])' "$FWORK/source.json" 2>/dev/null || echo none)"
+[ "$FTIER" = "high" ] && ok "proc-macro transition tiered HIGH" || bad "expected high, got '$FTIER'"
+echo
+
+# ===========================================================================
+echo "### TEST G — config: ignore_crates + [allow] suppression"
+GWORK="$WORK/g"; mkdir -p "$GWORK"
+cat > "$GWORK/cfg.toml" <<'TOML'
+ignore_crates = ["libc", "netcap"]
+
+[allow]
+netcap = ["TcpStream", "Command"]
+TOML
+python3 "$SCRIPTS/read_config.py" "$GWORK/cfg.toml" > "$GWORK/norm.txt" 2>"$GWORK/g.log"
+echo "  --- normalized config ---"; sed 's/^/    /' "$GWORK/norm.txt"
+have "$GWORK/norm.txt" 'IGNORE.*netcap'          && ok "read_config emits IGNORE netcap" || bad "IGNORE missing"
+have "$GWORK/norm.txt" 'ALLOW.*netcap.*TcpStream' && ok "read_config emits ALLOW netcap TcpStream" || bad "ALLOW missing"
+
+# full pipeline with netcap ignored -> overall tier none
+printf 'ignore_crates = ["netcap"]\n' > "$GWORK/ignore.toml"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$GWORK/run" MAX_CRATES=5 PR_NUMBER="" RSA_DRY_RUN=1 RSA_FIXTURES="$FIX" \
+  RSA_CONFIG="$GWORK/ignore.toml" GITHUB_OUTPUT="$GWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$GWORK/audit.log"
+have "$GWORK/out.txt" 'tier=none'                  && ok "ignored crate -> overall tier none" || bad "expected tier=none ($(grep '^tier=' "$GWORK/out.txt" 2>/dev/null))"
+have "$GWORK/run/comment_body.md" 'ignored'        && ok "comment notes the crate was ignored" || bad "comment missing 'ignored'"
+
+# full pipeline with the critical symbols allow-listed -> tier drops from critical
+cat > "$GWORK/allow.toml" <<'TOML'
+[allow]
+netcap = ["TcpStream", "Command", "process", "socket"]
+TOML
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$GWORK/run2" MAX_CRATES=5 PR_NUMBER="" RSA_DRY_RUN=1 RSA_FIXTURES="$FIX" \
+  RSA_CONFIG="$GWORK/allow.toml" GITHUB_OUTPUT="$GWORK/out2.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$GWORK/audit2.log"
+echo "  out2: $(tr '\n' ' ' < "$GWORK/out2.txt")"
+have "$GWORK/out2.txt" 'tier=none' && ok "allow patterns suppressed the critical symbols" \
+  || bad "allow did not lower tier ($(grep '^tier=' "$GWORK/out2.txt" 2>/dev/null))"
+echo
+
+# ===========================================================================
+echo "### TEST H — dependency-tree diff detects a newly-pulled crate"
+HWORK="$WORK/h"; mkdir -p "$HWORK"
+cat > "$HWORK/old.lock" <<'LOCK'
+[[package]]
+name = "probe_lib"
+version = "0.1.0"
+
+[[package]]
+name = "widget"
+version = "1.0.0"
+LOCK
+cat > "$HWORK/new.lock" <<'LOCK'
+[[package]]
+name = "probe_lib"
+version = "0.1.0"
+
+[[package]]
+name = "widget"
+version = "1.1.0"
+
+[[package]]
+name = "reqwest"
+version = "0.12.0"
+LOCK
+NEWPKGS="$( . "$SCRIPTS/lib.sh"; comm -13 \
+  <(pkg_set "$HWORK/old.lock" | awk '{print $1}' | sort -u) \
+  <(pkg_set "$HWORK/new.lock" | awk '{print $1}' | sort -u) )"
+echo "  new packages in tree: $(echo $NEWPKGS)"
+printf '%s\n' "$NEWPKGS" | grep -qx reqwest && ok "newly-pulled dependency 'reqwest' detected" || bad "reqwest not detected"
+echo
+
+# ===========================================================================
+echo "### TEST I — fail-on gating"
+IWORK="$WORK/i"; mkdir -p "$IWORK"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$IWORK/c" MAX_CRATES=5 PR_NUMBER="" RSA_DRY_RUN=1 RSA_FIXTURES="$FIX" \
+  FAIL_ON=critical GITHUB_OUTPUT="$IWORK/outc.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$IWORK/c.log"
+IRC=$?
+echo "  run_audit exit with FAIL_ON=critical on a critical bump: $IRC"
+[ "$IRC" -ne 0 ] && ok "fail-on=critical fails the check on a critical bump" || bad "expected non-zero exit, got $IRC"
+[ -f "$IWORK/c/comment_body.md" ] && ok "comment still produced before failing" || bad "no comment body on gated run"
+
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$IWORK/n" MAX_CRATES=5 PR_NUMBER="" RSA_DRY_RUN=1 RSA_FIXTURES="$FIX" \
+  FAIL_ON=none GITHUB_OUTPUT="$IWORK/outn.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$IWORK/n.log"
+INRC=$?
+[ "$INRC" -eq 0 ] && ok "fail-on=none stays advisory (exit 0)" || bad "fail-on=none should exit 0, got $INRC"
+echo
+
+# ===========================================================================
+echo "### TEST J — sticky comment marker present"
+have "$CWORK/comment_body.md" 'rust-symbol-audit -->' && ok "comment body carries the sticky-comment marker" \
+  || bad "sticky marker missing from comment body"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

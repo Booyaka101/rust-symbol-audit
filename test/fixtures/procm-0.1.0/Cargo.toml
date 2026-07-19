@@ -1,0 +1,10 @@
+[package]
+name = "procm"
+version = "0.1.0"
+edition = "2021"
+
+# 0.1.0 is an ordinary library.
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]

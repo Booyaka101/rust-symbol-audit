@@ -24,7 +24,7 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 17 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 31 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |
@@ -33,6 +33,12 @@ Expected result: **`RESULT: 17 passed, 0 failed` / `ALL GREEN`**.
 | B | `parse_lockdiff.sh` emits the bump row on a real git repo; a no-change diff → `changed=false`, empty TSV | #1, #4 |
 | C | Full pipeline `parse → run_audit → post_comment` (dry-run) produces a Markdown comment with a symbol table naming the crate | #1, #2 |
 | D | `build_crate.sh` fetches & builds **real crates.io versions** (`once_cell` 1.19.0 → 1.20.2) and the whole single-crate bump runs in **~2 s** | #5 |
+| E | Compile-time lane flags a newly-added **`build.rs`** that shells out (`netcap` 0.2.0 → 0.3.0) as **critical** — even though the bump adds **zero** new rlib symbols | new |
+| F | Compile-time lane flags a crate switching to **`proc-macro = true`** (`procm` 0.1.0 → 0.2.0) as **high** | new |
+| G | `.rust-symbol-audit.toml` `ignore_crates` drops a crate to `tier=none`; `[allow]` regexes suppress the critical symbols | new |
+| H | Dependency-tree diff detects a crate (`reqwest`) newly pulled into the resolved tree | new |
+| I | `fail-on: critical` makes the run exit non-zero (comment still posted) on a critical bump; `fail-on: none` stays advisory | new |
+| J | The PR comment carries the hidden sticky-comment marker used to update it in place | new |
 
 `test/fixtures/netcap-0.1.0` (pure compute) vs `netcap-0.2.0` (adds
 `TcpStream::connect` + `Command::spawn`) is the "real version bump that gains
@@ -82,9 +88,9 @@ needs a real PR. Do this once to confirm the Marketplace-facing behavior.
    PR. A `netcap` 0.1.0→0.2.0 bump must show a 🔴 CRITICAL table.
 
 ### Option B — drop it into a real existing Rust repo
-1. Push this action to a repo, tag it (e.g. `v1`).
+1. Push this action to a repo, tag it (e.g. `v2`).
 2. In the target repo add `.github/workflows/pr-audit.yml` with
-   `uses: booyaka101/rust-symbol-audit@v1` and `permissions: pull-requests: write`.
+   `uses: booyaka101/rust-symbol-audit@v2` and `permissions: pull-requests: write`.
 3. Open a PR that bumps a dependency (`cargo update -p <crate> --precise <ver>`
    then commit `Cargo.lock`). The comment should appear within a few minutes.
 

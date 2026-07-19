@@ -1,0 +1,18 @@
+# Example rust-symbol-audit config. Copy to your repo root as
+# `.rust-symbol-audit.toml` to tune out known-benign signals.
+#
+# Precedence: action inputs (fail-on, max-crates) win; this file governs
+# allow/ignore suppression only. Unknown keys are ignored, so comments and
+# future options are safe to leave in.
+
+# Crates to skip entirely — no findings will ever be reported for them.
+# Good for crates whose whole purpose is I/O / FFI and always trip a flag.
+ignore_crates = ["libc", "windows-sys"]
+
+# Per-crate suppression: drop any finding whose text matches one of these
+# regexes. Use this instead of muting the whole action when a trusted crate
+# legitimately uses a flagged capability.
+[allow]
+reqwest = ["TcpStream", "hyper", "rustls", "http", "to_socket_addrs"]
+ring    = ["mmap", "libc::"]
+tokio   = ["mio", "socket2", "TcpStream", "UdpSocket"]

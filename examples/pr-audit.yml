@@ -1,9 +1,9 @@
 # Example consumer workflow — copy this into your Rust repo at
 # .github/workflows/pr-audit.yml
 #
-# It runs rust-symbol-audit on every PR that touches Cargo.lock and posts a
-# capability-diff comment. If no dependency versions changed, the action exits
-# silently.
+# It runs rust-symbol-audit on every PR that touches Cargo.lock and posts (or
+# updates) a single capability-diff comment. If no dependency versions changed,
+# the action exits silently.
 name: dependency capability audit
 
 on:
@@ -14,7 +14,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # required so the action can post the PR comment
+  pull-requests: write   # required so the action can post/update the PR comment
 
 jobs:
   audit:
@@ -28,8 +28,13 @@ jobs:
           fetch-depth: 0
 
       - name: rust-symbol-audit
-        # In your own repo, replace this with:  uses: booyaka101/rust-symbol-audit@v1
+        # In your own repo, replace this with:  uses: booyaka101/rust-symbol-audit@v2
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          max-crates: "5"
+          max-crates: "10"
+          # Advisory by default. Set to critical/high/medium and add a branch
+          # protection rule on this check to block merges on capability creep.
+          fail-on: "none"
+          # Optional: path to allow/ignore config (default: .rust-symbol-audit.toml)
+          # config: ".rust-symbol-audit.toml"

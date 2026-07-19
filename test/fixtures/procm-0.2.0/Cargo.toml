@@ -1,0 +1,12 @@
+[package]
+name = "procm"
+version = "0.2.0"
+edition = "2021"
+
+# 0.2.0 quietly converts the crate into a proc-macro: its code now runs INSIDE
+# the compiler whenever a downstream project builds. inspect_source.sh flags the
+# transition to proc-macro = true.
+[lib]
+proc-macro = true
+
+[dependencies]

@@ -12,6 +12,10 @@ RUSTFILT="${RUSTFILT:-rustfilt}"
 
 log() { printf '[rust-symbol-audit] %s\n' "$*" >&2; }
 
+# Hidden marker embedded in the PR comment so we can find & update our own
+# previous comment instead of posting a new one every push (sticky comment).
+RSA_MARKER='<!-- rust-symbol-audit -->'
+
 # count_lines <file> -> number of lines (records), 0 for missing/empty.
 # Robust where `grep -c . f || echo 0` is not: on an empty file `grep -c`
 # prints 0 AND exits 1, so the `|| echo 0` fires and you get "0\n0", which then
@@ -67,4 +71,46 @@ extract_symbols() {
     | grep '^_R' \
     | "$RUSTFILT" \
     | sort -u
+}
+
+# crate_src_dir <crate> <version> -> path to the extracted crate source, or empty.
+#
+# The compile-time / manifest lane needs the crate's *source* (build.rs,
+# Cargo.toml), not just its compiled rlib. Two cases:
+#   - Local testing: RSA_FIXTURES/<crate>-<version> is a path-dep fixture.
+#   - crates.io: cargo extracts the .crate tarball into
+#     $CARGO_HOME/registry/src/<index>/<crate>-<version>/ during resolution
+#     (this happens even if the later *compile* fails, so this lane still works
+#     for proc-macro / bin-only crates that don't produce a diffable rlib).
+crate_src_dir() {
+  local crate="$1" version="${2:-}"
+  [ -n "$version" ] || return 0
+  if [ -n "${RSA_FIXTURES:-}" ] && [ -d "${RSA_FIXTURES}/${crate}-${version}" ]; then
+    printf '%s\n' "${RSA_FIXTURES}/${crate}-${version}"
+    return 0
+  fi
+  local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+  local d
+  d="$(find "$cargo_home/registry/src" -maxdepth 2 -type d -name "${crate}-${version}" 2>/dev/null | head -1)"
+  [ -n "$d" ] && printf '%s\n' "$d"
+}
+
+# pkg_set <cargo_lock> -> sorted-unique "name version" for every [[package]].
+# Used to diff the resolved dependency *tree* of the old vs new build (each
+# build_crate probe writes a full Cargo.lock), surfacing crates a bump newly
+# pulls in — capability that can enter transitively, which the audited crate's
+# own symbols won't show.
+pkg_set() {
+  [ -f "$1" ] || return 0
+  awk '
+    /^\[\[package\]\]/                 { name=""; ver=""; inpkg=1; next }
+    /^\[/ && $0 !~ /^\[\[package\]\]/  { inpkg=0 }
+    inpkg && /^name = / {
+      l=$0; sub(/^name = "/,"",l); sub(/".*$/,"",l); name=l
+    }
+    inpkg && /^version = / {
+      l=$0; sub(/^version = "/,"",l); sub(/".*$/,"",l); ver=l
+      if (name != "") print name " " ver
+    }
+  ' "$1" | sort -u
 }

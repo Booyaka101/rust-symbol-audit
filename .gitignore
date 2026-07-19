@@ -12,6 +12,10 @@ rsa-local/
 build.err
 build.log
 
+# Python bytecode (read_config.py is invoked via the interpreter)
+__pycache__/
+*.pyc
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
