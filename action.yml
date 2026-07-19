@@ -21,6 +21,18 @@ inputs:
     description: "Path (repo-relative) to the .rust-symbol-audit.toml config used to allow/ignore known-benign signals."
     required: false
     default: ".rust-symbol-audit.toml"
+  reviews:
+    description: "Path (repo-relative) to the review ledger. Signing off a (crate, version) makes future bumps alarm only on the unreviewed capability delta."
+    required: false
+    default: ".rust-symbol-audit/reviews.toml"
+  check-provenance:
+    description: "Query crates.io for publisher / source-repo / yank changes (needs network). Set to 'false' to disable."
+    required: false
+    default: "true"
+  check-advisories:
+    description: "Query OSV.dev (RustSec) for known advisories against the new version (needs network). Set to 'false' to disable."
+    required: false
+    default: "true"
 
 outputs:
   changed:
@@ -35,6 +47,15 @@ outputs:
   build-script-changes:
     description: "Number of audited crates whose build script was newly added or changed."
     value: ${{ steps.audit.outputs.build-script-changes }}
+  advisories:
+    description: "Count of known RustSec/OSV advisories found across audited crates."
+    value: ${{ steps.audit.outputs.advisories }}
+  recommendation:
+    description: "auto-merge (overall tier none) or review — useful for gating Dependabot auto-merge."
+    value: ${{ steps.audit.outputs.recommendation }}
+  report:
+    description: "Path to the machine-readable audit-report.json evidence file."
+    value: ${{ steps.audit.outputs.report }}
 
 runs:
   using: "composite"
@@ -87,9 +108,21 @@ runs:
         MAX_CRATES: ${{ inputs.max-crates }}
         FAIL_ON: ${{ inputs.fail-on }}
         RSA_CONFIG: ${{ inputs.config }}
+        REVIEWS: ${{ inputs.reviews }}
+        RSA_CHECK_PROVENANCE: ${{ inputs.check-provenance == 'false' && '0' || '1' }}
+        RSA_CHECK_ADVISORIES: ${{ inputs.check-advisories == 'false' && '0' || '1' }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         LOCKDIFF_TSV: ${{ runner.temp }}/rsa/lockdiff.tsv
         WORK: ${{ runner.temp }}/rsa
       run: |
         "${{ github.action_path }}/scripts/run_audit.sh"
+
+    - name: Upload audit evidence report
+      if: steps.parse.outputs.changed == 'true' && steps.audit.outputs.report != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-symbol-audit-report
+        path: ${{ runner.temp }}/rsa/audit-report.json
+        if-no-files-found: ignore

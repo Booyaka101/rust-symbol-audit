@@ -1,72 +1,62 @@
 # rust-symbol-audit
 
 A GitHub Action that turns a Rust dependency bump into a **capability-creep
-review**. On PRs that change `Cargo.lock`, for every crate whose version changed
-it answers the question a version number can't:
+review you can actually gate on**. On PRs that change `Cargo.lock`, for every
+crate whose version changed it runs five checks, merges them into one **sticky PR
+comment**, and — once you've signed a version off — only ever alarms again on the
+**unreviewed delta**.
 
-> *This patch bump — did the crate quietly start opening sockets, spawning
-> processes, or running code on my build machine?*
+It answers what a version number can't: *this bump — did the crate start opening
+sockets, spawning processes, running code on my build machine, change who
+publishes it, or ship a known vuln?*
 
-It looks three ways, because no single view is enough:
+## The five lanes
 
-1. **Symbols** — builds the old and new version, diffs the **v0-demangled**
-   symbols in each compiled `.rlib`, and flags newly-referenced sensitive APIs
-   (`std::process::Command`, `TcpStream`, `std::fs`, `env::var`, secret-ish
-   names, `reqwest`/`rustls`…).
-2. **Compile-time surface** — inspects each version's source for a newly-added or
-   changed **`build.rs`**, a switch to **`proc-macro = true`**, or a new
-   **`links =`** native library. This is code that runs *on your build machine at
-   compile time* — the higher-value supply-chain vector that symbol-diffing is
-   structurally blind to.
-3. **Dependency tree** — diffs the resolved dependency set old-vs-new and lists
-   crates the bump **newly pulls into your build**, highlighting ones with known
-   network / process / crypto / FFI capability.
+1. **Symbols** — builds old + new, diffs the **v0-demangled** `.rlib` symbols, and
+   flags newly-referenced sensitive APIs (`std::process::Command`, `TcpStream`,
+   `std::fs`, `env::var`, secret-ish names, `reqwest`/`rustls`…).
+2. **Compile-time surface** — a newly-added or changed **`build.rs`**, a switch to
+   **`proc-macro = true`**, or a new **`links =`** native lib. Code that runs *on
+   your build machine at compile time* — and the comment shows the **actual
+   build-script diff**, not just "it changed". Symbol-diffing is blind to this.
+3. **Dependency tree** — crates the bump **newly pulls into your build**,
+   highlighting ones with known network / process / crypto / FFI capability.
+4. **Provenance** *(network)* — via the crates.io API: a version **published by a
+   different account** than before, a crate with **no source repository**, or a
+   **yanked** version. This is what real supply-chain attacks look like first.
+5. **Advisories** *(network)* — via OSV.dev (RustSec): known vulnerabilities
+   against the exact new version.
 
-The highest surviving signal across all three lanes becomes a single **sticky PR
-comment** (updated in place on each push), and can optionally **fail the check**
-to block a merge.
+## The ratchet — why you can leave it on
 
-> **What this is — and isn't.** It's a *triage gate*, not a sandbox or a proof.
-> It reliably surfaces the realistic "a dependency's capability surface changed —
-> go look" case and is quiet enough to leave on. It does **not** catch capability
-> reached purely through generics never instantiated in the crate's own rlib, or
-> through a dependency that didn't itself change, and a determined attacker can
-> evade static symbol tells. A flag is a prompt to review, not proof of malice.
+A per-PR heuristic that re-alarms on every bump gets muted. rust-symbol-audit is
+**stateful**: sign a version off once in `.rust-symbol-audit/reviews.toml` and
+future audits stay green for it — so every red is genuinely **new and
+unreviewed**. That's what makes `fail-on` trustworthy enough to block merges.
 
-## Why the symbol trick works
+```toml
+# .rust-symbol-audit/reviews.toml — capability sign-offs
+[[review]]
+crate = "reqwest"
+version = "0.12.0"
+reviewed_by = "alice"
+notes = "http client; network capability expected"
+```
 
-Since **Rust 1.97 (2026-07-09)** the `v0` symbol mangling scheme is the stable
-default. v0 symbols demangle back to real, stable, human-readable paths like
-`<std::net::tcp::TcpStream as std::io::Write>::write`, so a plain `nm | rustfilt`
-over a compiled `.rlib` reveals which library capabilities a crate's code reaches
-for — no debug info needed. This action forces `-C symbol-mangling-version=v0`
-explicitly, so it also works on toolchains older than 1.97.
+The PR comment includes a copy-paste **sign-off snippet** for each unreviewed
+crate (or run `scripts/review.sh <crate> <version>`), so approving a bump is one
+paste. Crucially, a sign-off suppresses **only** the capability lanes — a later
+**advisory or provenance change is never hidden by an old review**.
 
-## What it does (pipeline)
-
-| Step | Script | Role |
-|---|---|---|
-| 1 | `parse_lockdiff.sh` | `git diff` `Cargo.lock` base→HEAD → TSV of `crate old new`. No change → `changed=false`, exit 0. |
-| 2 | `build_crate.sh` | Build each version in isolation as a dependency of a throwaway probe lib; print its `.rlib`. |
-| 3 | `diff_symbols.sh` | `nm` → keep `_R…` (v0) → `rustfilt` → `comm` → symbols only in the new version. |
-| 3b | `inspect_source.sh` | Flag newly-added/changed `build.rs`, proc-macro transition, new `links =`. |
-| 4 | `risk_check.sh` | Pattern-match added symbols into risk tiers. |
-| 5 | `run_audit.sh` → `post_comment.sh` | Merge the three lanes, apply config allow/ignore, render + post the sticky comment, optionally fail the check. |
-
-### Risk tiers
-
-| Tier | 🔴 critical | 🟠 high | 🟡 medium |
-|---|---|---|---|
-| Symbols | process exec/spawn, raw sockets (`TcpStream`/`UdpSocket`), syscalls/FFI, mem-injection | filesystem, env access, secret-ish identifiers (`token`/`password`/`api_key`) | higher-level networking (`http`/`tls`/`dns`, `reqwest`/`hyper`/`rustls`) |
-| Compile-time | build script (added/changed) that references process/net/fs APIs | new build script, or crate became a proc-macro | new `links =` native library |
-| Dependencies | — | — | newly-pulled crate with known capability |
-
-The comment's overall tier is the highest seen across all changed crates and all
-three lanes.
+> **What this is — and isn't.** A *triage gate*, not a sandbox or a proof. It
+> reliably surfaces the realistic "this dependency's surface changed — look" case
+> and is quiet enough to keep on. It does **not** catch capability reached only
+> through generics never instantiated in the crate's own rlib, and a determined
+> attacker can evade static symbol tells. A flag is a prompt to review.
 
 ## Usage
 
-Copy [`examples/pr-audit.yml`](examples/pr-audit.yml) into your repo at
+Copy [`examples/pr-audit.yml`](examples/pr-audit.yml) to
 `.github/workflows/pr-audit.yml`:
 
 ```yaml
@@ -75,125 +65,99 @@ on:
     paths: ["Cargo.lock"]
 permissions:
   contents: read
-  pull-requests: write        # needed to post/update the comment
+  pull-requests: write        # post/update the comment
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }   # so base.sha is reachable
-      - uses: booyaka101/rust-symbol-audit@v2
+        with: { fetch-depth: 0 }
+      - uses: booyaka101/rust-symbol-audit@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          max-crates: "10"         # audit up to N crates; list the rest
           fail-on: "none"          # or critical/high/medium to block merges
 ```
 
+To auto-merge boring Dependabot bumps and hold risky ones, see
+[`examples/auto-merge.yml`](examples/auto-merge.yml) (gates GitHub auto-merge on
+the `recommendation` output).
+
 ### Inputs
 
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `github-token` | yes | — | Usually `secrets.GITHUB_TOKEN`. Used to post/update the comment. |
-| `max-crates` | no | `10` | Audit at most this many changed crates; the remainder are listed as "not audited" (symbol-diffing every crate is slow). |
-| `fail-on` | no | `none` | Fail the check when the overall tier reaches this level: `none`\|`medium`\|`high`\|`critical`. `none` = advisory comment only. Combine with branch protection to block merges. |
-| `config` | no | `.rust-symbol-audit.toml` | Path to the repo's config file for allow/ignore rules. |
+| Input | Default | Description |
+|---|---|---|
+| `github-token` | — | Usually `secrets.GITHUB_TOKEN`. Posts/updates the comment. |
+| `max-crates` | `10` | Audit at most this many changed crates; the rest are listed as "not audited". |
+| `fail-on` | `none` | Fail the check at `medium`/`high`/`critical`. `none` = advisory only. |
+| `config` | `.rust-symbol-audit.toml` | Allow/ignore rules to suppress known-benign signals. |
+| `reviews` | `.rust-symbol-audit/reviews.toml` | The review ledger (the ratchet). |
+| `check-provenance` | `true` | Query crates.io for publisher/repo/yank changes (needs network). |
+| `check-advisories` | `true` | Query OSV.dev for RustSec advisories (needs network). |
 
 ### Outputs
 
 | Output | Description |
 |---|---|
-| `changed` | `true`/`false` — did any crate version change in `Cargo.lock`. |
+| `changed` | Did any crate version change in `Cargo.lock`. |
 | `tier` | Highest risk tier: `critical`/`high`/`medium`/`none`. |
-| `flagged` | Comma-separated crates that had at least one flagged capability. |
-| `build-script-changes` | Count of audited crates whose build script was newly added or changed. |
+| `flagged` | Comma-separated crates with a flagged signal. |
+| `build-script-changes` | Count of crates whose build script was added/changed. |
+| `advisories` | Count of known RustSec/OSV advisories found. |
+| `recommendation` | `auto-merge` (tier none) or `review` — gate Dependabot auto-merge on this. |
+| `report` | Path to the machine-readable `audit-report.json` evidence file. |
 
-### Tuning out false positives — `.rust-symbol-audit.toml`
+### Suppressing false positives — `.rust-symbol-audit.toml`
 
-A capability flag on a crate you trust is noise. Silence it per-crate instead of
-muting the whole bot. Drop a config file at your repo root (see
-[`examples/rust-symbol-audit.toml`](examples/rust-symbol-audit.toml)):
+See [`examples/rust-symbol-audit.toml`](examples/rust-symbol-audit.toml):
 
 ```toml
-# Never flag these crates at all (e.g. ones whose whole job is I/O).
-ignore_crates = ["libc", "windows-sys"]
+ignore_crates = ["libc", "windows-sys"]     # never flag these
 
 [allow]
-# Per crate: suppress any finding whose text matches one of these regexes.
-reqwest = ["TcpStream", "hyper", "rustls", "http"]
-ring    = ["mmap", "libc::"]
+reqwest = ["TcpStream", "hyper", "rustls"]  # suppress these findings for this crate
 ```
 
-Action inputs (`fail-on`, `max-crates`) take precedence; the config file governs
-allow/ignore suppression.
+`ignore`/`allow` silence a signal forever; the **ledger** signs off one version
+at a time (and still surfaces future advisories). Use `allow` for "this crate is
+allowed this capability always", the ledger for "I reviewed exactly this version".
+
+### Compliance / SLSA evidence
+
+Every run writes `audit-report.json` (overall verdict + every finding, per crate
+and lane) and uploads it as a workflow artifact — the record that the dependency
+change was reviewed.
 
 ## Run it locally
 
-No GitHub needed. Requires `rustup`/`cargo`, `rustfilt` (`cargo install
-rustfilt`), and a symbol lister (GNU `nm`, or `rustup component add llvm-tools`
-which provides `llvm-nm` — auto-detected on Windows). Then, in **Git Bash**:
+Requires `rustup`/`cargo`, `rustfilt` (`cargo install rustfilt`), and a symbol
+lister (GNU `nm`, or `rustup component add llvm-tools` → `llvm-nm`, auto-detected
+on Windows). In **Git Bash**:
 
 ```bash
-bash test/run_local.sh
+bash test/run_local.sh      # -> RESULT: 46 passed, 0 failed / ALL GREEN
 ```
 
-This exercises all three lanes offline against real fixtures plus one real
-crates.io bump, and asserts every acceptance check. Expected tail:
-
-```
-RESULT: 31 passed, 0 failed
-ALL GREEN
-```
-
-See [`TESTING.md`](TESTING.md) for how to try it against a real repo/PR.
-
-## Sample output
-
-A bump that gains `TcpStream` + `Command` at runtime:
-
-> ## 🛡️ rust-symbol-audit — 🔴 **CRITICAL** — a dependency gained process-exec / raw-socket / syscall / build-time-code capability
->
-> ### 🔴 `netcap` 0.1.0 → 0.2.0 — **CRITICAL**
->
-> **Added symbols (capability):**
->
-> | risk | added symbol |
-> |:--|:--|
-> | 🔴 critical | `<std::process::Command>::spawn` |
-> | 🔴 critical | `<std::sys::net::connection::socket::TcpStream>::connect::inner` |
-
-A bump that adds **zero new symbols** but ships a malicious build script — caught
-only by the compile-time lane:
-
-> ### 🔴 `netcap` 0.2.0 → 0.3.0 — **CRITICAL**
->
-> **Compile-time surface:**
->
-> - 🔴 **build-script** — new version ADDED a build script that references process / network / fs APIs — this runs on your build machine at compile time
->
-> _No newly-added symbols in the compiled rlib._
+Exercises all five lanes, the ledger ratchet, config suppression, gating, the
+Dependabot recommendation, and the evidence report — offline, using fixtures and
+mock crates.io / OSV responses (plus one real crates.io bump). See
+[`TESTING.md`](TESTING.md) for the live-PR checklist.
 
 ## What it can and can't catch
 
-**Catches well**
-- A crate that starts *directly* calling `std::net` / `std::process` / `std::fs`.
-- A newly-added or changed **build script**, or a switch to **proc-macro** — code
-  that runs at compile time (works even when the crate fails to build as a lib).
-- A **native library** newly linked in, and **new crates** pulled into the tree.
+**Catches well:** a crate that starts directly calling `std::net`/`process`/`fs`;
+a new or changed **build script** / **proc-macro** (even when the crate won't
+build as a lib); a **native lib** newly linked; **new crates** in the tree; a
+**publisher/repo/yank** change; a **known advisory** on the new version.
 
-**Misses / limits (inherent to static analysis)**
-- Capability reached only through generics never instantiated in the crate's own
-  rlib, or through a dependency whose own version didn't change.
-- Runtime behavior — it reads the *capability surface*, it does not sandbox.
-- Many crates don't build **standalone as a library** (feature/system-lib-gated,
-  proc-macro-only, bin-only). Those are reported as `build failed` for the symbol
-  lane, but the compile-time and dependency lanes still apply.
-- Pattern-based tiering can miss and can over-flag; use `.rust-symbol-audit.toml`
-  to quiet known-benign signals.
-- `added=0` is common and correct for internal-only patch releases.
+**Misses / limits (inherent to static analysis):** capability via generics never
+instantiated in the crate's own rlib, or via an unchanged dependency; runtime
+behavior (it reads surface, doesn't sandbox); crates that can't build standalone
+(symbol lane only — other lanes still apply); network lanes need connectivity and
+degrade gracefully offline. Tune noise with the config + ledger.
 
 ## Best first distribution step
 
-Publish the repo and submit it to the **GitHub Marketplace** under the *Security*
-category with the tagline *"A capability-creep triage gate for Rust dependency
-PRs."* The built-in audience is maintainers already nervous about supply-chain
-risk, and the build-time-code lane is the concrete hook symbol-only tools lack.
+Publish to the **GitHub Marketplace** (Security category), tagline *"A
+capability-creep triage gate for Rust dependency PRs — with a review ratchet you
+can block merges on."* The build-time-code lane and the sign-off ratchet are the
+concrete hooks symbol-only and advisory-only tools lack.

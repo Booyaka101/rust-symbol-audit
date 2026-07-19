@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: rust-symbol-audit
-        # In your own repo, replace this with:  uses: booyaka101/rust-symbol-audit@v2
+        # In your own repo, replace this with:  uses: booyaka101/rust-symbol-audit@v3
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

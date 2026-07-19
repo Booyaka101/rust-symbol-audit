@@ -1,0 +1,11 @@
+{
+  "vulns": [
+    {
+      "id": "RUSTSEC-2099-0001",
+      "summary": "vulncrate mishandles untrusted input leading to memory unsafety",
+      "severity": [
+        { "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }
+      ]
+    }
+  ]
+}

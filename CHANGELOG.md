@@ -4,6 +4,43 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-07-19
+
+Makes the tool a **gate you can block merges on**: a stateful review ledger
+(ratchet) plus two supply-chain lanes, Dependabot auto-merge triage, and a
+compliance evidence report.
+
+### Added
+- **Review ledger / ratchet** (`.rust-symbol-audit/reviews.toml`,
+  `read_reviews.py`, `review.sh`). Sign off a `(crate, version)` once; future
+  bumps only alarm on the **unreviewed capability delta**. The PR comment emits a
+  copy-paste sign-off snippet, and shows a "reviewed ✅" badge. A sign-off
+  suppresses **only** the capability lanes — advisories and provenance changes are
+  never hidden by a stale review.
+- **Provenance lane** (`provenance.sh`, network) — crates.io publisher change,
+  missing source repository, or yanked version. Mockable via `RSA_CRATESIO_FIXTURE`.
+- **Advisory lane** (`advisories.sh`, network) — known RustSec vulns for the new
+  version via OSV.dev. Mockable via `RSA_ADVISORY_FIXTURE`.
+- **Concrete build.rs diff** — the comment now shows the actual build-script
+  code/diff in a `<details>` block, not just that it changed.
+- **Dependabot / Renovate triage** — `recommendation` output (`auto-merge` when
+  tier is none, else `review`) + a bot banner in the comment; example
+  `examples/auto-merge.yml` gates GitHub auto-merge on it.
+- **Compliance evidence** — every run writes `audit-report.json` (`build_report.py`)
+  with the overall verdict and every finding per crate/lane, uploaded as a
+  workflow artifact.
+- **New inputs**: `reviews`, `check-provenance`, `check-advisories`.
+  **New outputs**: `advisories`, `recommendation`, `report`.
+- **New fixtures & tests** — mock crates.io / OSV responses; tests for the ratchet,
+  the "advisory survives sign-off" safety property, both network lanes, the
+  Dependabot recommendation, the build.rs diff, and the evidence report. Suite is
+  now **46 checks**.
+
+### Migration
+- `uses: booyaka101/rust-symbol-audit@v2` → `@v3`. Existing workflows keep working;
+  new lanes/inputs are additive. The network lanes default on and degrade
+  gracefully offline (set `check-provenance`/`check-advisories: "false"` to skip).
+
 ## [2.0.0] — 2026-07-19
 
 Turns the symbol-diff tool into a fuller **capability-creep triage gate**: three
@@ -64,5 +101,6 @@ capabilities as a PR comment.
 - **Consumer example** (`examples/pr-audit.yml`) and docs (`README.md`,
   `TESTING.md`).
 
+[3.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.0
 [2.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v2.0.0
 [1.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v1.0.0

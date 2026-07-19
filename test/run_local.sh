@@ -263,6 +263,98 @@ have "$CWORK/comment_body.md" 'rust-symbol-audit -->' && ok "comment body carrie
 echo
 
 # ===========================================================================
+echo "### TEST K — review ledger ratchet: a signed-off version -> tier none"
+export RSA_FIXTURES="$FIX"
+KWORK="$WORK/k"; mkdir -p "$KWORK"
+printf '[[review]]\ncrate = "netcap"\nversion = "0.2.0"\nreviewed_by = "carol"\n' > "$KWORK/reviews.toml"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$KWORK/run" REVIEWS="$KWORK/reviews.toml" RSA_DRY_RUN=1 PR_NUMBER="" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 GITHUB_OUTPUT="$KWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$KWORK/run.log"
+have "$KWORK/out.txt" 'tier=none' && ok "signed-off netcap 0.2.0 -> overall tier none (the ratchet)" \
+  || bad "expected tier=none ($(grep '^tier=' "$KWORK/out.txt" 2>/dev/null))"
+have "$KWORK/run/comment_body.md" 'reviewed ✅|Signed off in the review ledger' && ok "comment shows the reviewed badge" || bad "no reviewed badge"
+echo
+
+# ===========================================================================
+echo "### TEST L — advisories/provenance are NOT hidden by a stale sign-off"
+LWORK="$WORK/l"; mkdir -p "$LWORK"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$LWORK/run" REVIEWS="$KWORK/reviews.toml" \
+  RSA_CRATESIO_FIXTURE="$FIX/cratesio" RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$LWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$LWORK/run.log"
+have "$LWORK/out.txt" 'tier=high' && ok "provenance change survives the sign-off (tier high, not none)" \
+  || bad "expected tier=high ($(grep '^tier=' "$LWORK/out.txt" 2>/dev/null))"
+have "$LWORK/run/comment_body.md" 'DIFFERENT account' && ok "publisher-change surfaced despite the sign-off" || bad "publisher-change was hidden"
+echo
+
+# ===========================================================================
+echo "### TEST M — provenance.sh detects a publisher change (mock crates.io)"
+MWORK="$WORK/m"; mkdir -p "$MWORK"
+RSA_CRATESIO_FIXTURE="$FIX/cratesio" "$SCRIPTS/provenance.sh" netcap 0.1.0 0.2.0 "$MWORK" >/dev/null 2>"$MWORK/m.log"
+echo "  --- provenance_findings.tsv ---"; sed 's/^/    /' "$MWORK/provenance_findings.tsv" 2>/dev/null
+have "$MWORK/provenance_findings.tsv" 'publisher-change' && ok "publisher-change detected (original-author -> attacker-acct)" || bad "publisher-change not detected"
+echo
+
+# ===========================================================================
+echo "### TEST N — advisories.sh detects a RustSec/OSV advisory (mock)"
+N2WORK="$WORK/n2"; mkdir -p "$N2WORK"
+RSA_ADVISORY_FIXTURE="$FIX/osv" "$SCRIPTS/advisories.sh" vulncrate 1.0.0 "$N2WORK" >/dev/null 2>"$N2WORK/n.log"
+echo "  --- advisory_findings.tsv ---"; sed 's/^/    /' "$N2WORK/advisory_findings.tsv" 2>/dev/null
+have "$N2WORK/advisory_findings.tsv" 'RUSTSEC-2099-0001' && ok "advisory RUSTSEC-2099-0001 detected via OSV mock" || bad "advisory not detected"
+echo
+
+# ===========================================================================
+echo "### TEST O — Dependabot auto-merge recommendation"
+OWORK="$WORK/o"; mkdir -p "$OWORK"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$OWORK/r" REVIEWS="/nonexistent" PR_AUTHOR="dependabot[bot]" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$OWORK/r_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$OWORK/r.log"
+have "$OWORK/r_out.txt" 'recommendation=review' && ok "risky bot bump -> recommendation=review" || bad "expected recommendation=review"
+have "$OWORK/r/comment_body.md" 'Bot dependency bump' && ok "bot banner present in comment" || bad "bot banner missing"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$OWORK/a" REVIEWS="$KWORK/reviews.toml" PR_AUTHOR="dependabot[bot]" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$OWORK/a_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$OWORK/a.log"
+have "$OWORK/a_out.txt" 'recommendation=auto-merge' && ok "clean (signed-off) bot bump -> recommendation=auto-merge" || bad "expected recommendation=auto-merge"
+echo
+
+# ===========================================================================
+echo "### TEST P — machine-readable evidence report (audit-report.json)"
+have "$OWORK/r/audit-report.json" 'rust-symbol-audit' && ok "evidence report produced" || bad "no evidence report"
+python3 -c "import json; d=json.load(open('$OWORK/r/audit-report.json')); assert d['schema']==1 and d['overall_tier']=='critical' and d['crates'] and d['crates'][0]['symbols']" 2>/dev/null \
+  && ok "evidence JSON well-formed (critical verdict + per-crate symbols)" || bad "evidence JSON malformed/unexpected"
+echo
+
+# ===========================================================================
+echo "### TEST Q — build.rs concrete diff shown in the comment (netcap 0.2.0 -> 0.3.0)"
+QWORK="$WORK/q"; mkdir -p "$QWORK"
+printf 'netcap\t0.2.0\t0.3.0\n' > "$QWORK/lockdiff.tsv"
+LOCKDIFF_TSV="$QWORK/lockdiff.tsv" WORK="$QWORK/run" REVIEWS="/nonexistent" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$QWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$QWORK/run.log"
+have "$QWORK/run/comment_body.md" 'show build script' && ok "comment includes the build.rs <details> block" || bad "no build.rs details block"
+have "$QWORK/run/comment_body.md" 'build-time code executed' && ok "comment shows the ACTUAL build.rs code, not just 'it changed'" || bad "build.rs content not shown"
+echo
+
+# ===========================================================================
+echo "### TEST R — read_reviews.py: ALL vs ACCEPT normalization"
+R2WORK="$WORK/r2"; mkdir -p "$R2WORK"
+cat > "$R2WORK/reviews.toml" <<'TOML'
+[[review]]
+crate = "foo"
+version = "1.0.0"
+reviewed_by = "dave"
+
+[[review]]
+crate = "bar"
+version = "2.0.0"
+accept = ["TcpStream", "hyper"]
+TOML
+python3 "$SCRIPTS/read_reviews.py" "$R2WORK/reviews.toml" > "$R2WORK/norm.txt"
+echo "  --- normalized ledger ---"; sed 's/^/    /' "$R2WORK/norm.txt"
+have "$R2WORK/norm.txt" 'REVIEW.*foo.*1.0.0.*ALL.*dave'    && ok "whole-version sign-off -> ALL" || bad "ALL entry missing"
+have "$R2WORK/norm.txt" 'REVIEW.*bar.*2.0.0.*ACCEPT.*hyper' && ok "per-capability accept -> ACCEPT" || bad "ACCEPT entry missing"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

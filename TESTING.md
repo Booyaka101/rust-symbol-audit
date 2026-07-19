@@ -24,7 +24,7 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 31 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 46 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |
@@ -39,6 +39,14 @@ Expected result: **`RESULT: 31 passed, 0 failed` / `ALL GREEN`**.
 | H | Dependency-tree diff detects a crate (`reqwest`) newly pulled into the resolved tree | new |
 | I | `fail-on: critical` makes the run exit non-zero (comment still posted) on a critical bump; `fail-on: none` stays advisory | new |
 | J | The PR comment carries the hidden sticky-comment marker used to update it in place | new |
+| K | **Review-ledger ratchet**: signing off `netcap` 0.2.0 drops the overall tier to `none` with a "reviewed ✅" badge | new |
+| L | A stale sign-off does **not** hide a provenance change — publisher swap still tiers **high** | new |
+| M | `provenance.sh` detects a publisher change against a mock crates.io response | new |
+| N | `advisories.sh` detects a RustSec/OSV advisory against a mock OSV response | new |
+| O | Dependabot triage: risky bump → `recommendation=review` + bot banner; clean bump → `auto-merge` | new |
+| P | `audit-report.json` evidence file is well-formed with the verdict + per-crate findings | new |
+| Q | The comment shows the **actual build.rs code** (not just "it changed") in a `<details>` block | new |
+| R | `read_reviews.py` normalizes whole-version (`ALL`) vs per-capability (`ACCEPT`) sign-offs | new |
 
 `test/fixtures/netcap-0.1.0` (pure compute) vs `netcap-0.2.0` (adds
 `TcpStream::connect` + `Command::spawn`) is the "real version bump that gains
@@ -88,9 +96,9 @@ needs a real PR. Do this once to confirm the Marketplace-facing behavior.
    PR. A `netcap` 0.1.0→0.2.0 bump must show a 🔴 CRITICAL table.
 
 ### Option B — drop it into a real existing Rust repo
-1. Push this action to a repo, tag it (e.g. `v2`).
+1. Push this action to a repo, tag it (e.g. `v3`).
 2. In the target repo add `.github/workflows/pr-audit.yml` with
-   `uses: booyaka101/rust-symbol-audit@v2` and `permissions: pull-requests: write`.
+   `uses: booyaka101/rust-symbol-audit@v3` and `permissions: pull-requests: write`.
 3. Open a PR that bumps a dependency (`cargo update -p <crate> --precise <ver>`
    then commit `Cargo.lock`). The comment should appear within a few minutes.
 
@@ -101,6 +109,17 @@ needs a real PR. Do this once to confirm the Marketplace-facing behavior.
 - [ ] A PR that does **not** change `Cargo.lock` → job is skipped / exits 0 with
       no comment. *(acc #4)*  (The `paths: ["Cargo.lock"]` filter also gates this.)
 - [ ] A single-crate bump finishes well under 4 minutes. *(acc #5)*
+- [ ] **Sticky comment**: push a second commit to the PR → the *same* comment is
+      updated, not a new one posted. *(v2)*
+- [ ] **Ratchet**: sign the version off (paste the comment's snippet into
+      `.rust-symbol-audit/reviews.toml`, or run `scripts/review.sh`), push → the
+      next run shows "reviewed ✅" and drops the tier. *(v3, ledger)*
+- [ ] **Network lanes** *(v3, live-only — mocked in the local suite)*: on a real
+      crates.io bump the comment includes any OSV/RustSec **advisory** and, if the
+      publisher/repo/yank changed, a **provenance** finding. Try a crate+version
+      with a known RustSec advisory to confirm the advisory lane fires.
+- [ ] **Evidence artifact**: the run uploads `rust-symbol-audit-report` containing
+      `audit-report.json`. *(v3)*
 
 ### Gotchas
 - **`fetch-depth: 0`** in `actions/checkout` (or at least a fetch of `base.sha`) —
@@ -108,3 +127,6 @@ needs a real PR. Do this once to confirm the Marketplace-facing behavior.
 - **`permissions: pull-requests: write`** — without it `gh pr comment` gets 403.
 - The action installs `rustfilt` via `cargo install` on first run (~30–60 s),
   cached thereafter by the `actions/cache` step.
+- **Network lanes**: provenance (crates.io) and advisories (OSV.dev) need outbound
+  HTTPS. They degrade gracefully (a "unavailable" note, tier none) if the runner
+  is offline; disable with `check-provenance`/`check-advisories: "false"`.

@@ -1,0 +1,41 @@
+# Example: auto-merge boring Dependabot bumps, hold risky ones for review.
+#
+# rust-symbol-audit annotates each bot bump PR and emits `recommendation`
+# (auto-merge when the overall tier is `none`, else `review`). This workflow
+# enables GitHub auto-merge only when the audit says the bump added no new
+# capability, advisory, or provenance change — so humans only look at the ones
+# that actually changed the risk surface.
+#
+# Requires: repo setting "Allow auto-merge" enabled, and a branch protection
+# rule requiring this check (or the audit check) to pass.
+name: dependency capability audit + auto-merge
+
+on:
+  pull_request:
+    paths: ["Cargo.lock"]
+
+permissions:
+  contents: write         # for enabling auto-merge
+  pull-requests: write    # for the comment
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: audit
+        uses: booyaka101/rust-symbol-audit@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on: "high"          # block merges on high/critical capability creep
+
+      - name: Enable auto-merge for safe bot bumps
+        if: >
+          steps.audit.outputs.recommendation == 'auto-merge' &&
+          github.actor == 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}"

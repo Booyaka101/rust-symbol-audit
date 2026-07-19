@@ -1,0 +1,10 @@
+{
+  "crate": {
+    "name": "netcap",
+    "repository": "https://github.com/example/netcap"
+  },
+  "versions": [
+    { "num": "0.2.0", "yanked": false, "published_by": { "login": "attacker-acct" } },
+    { "num": "0.1.0", "yanked": false, "published_by": { "login": "original-author" } }
+  ]
+}

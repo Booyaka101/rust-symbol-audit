@@ -61,7 +61,11 @@ if [ -z "$NEW_SRC" ]; then
 fi
 
 # --- build.rs lane ---------------------------------------------------------
+# Captures the ACTUAL build-script code/diff into $OUTDIR/build_rs.diff so the
+# comment can show reviewers exactly what runs at compile time — not just that
+# something changed.
 NEW_BS="$(build_rs_path "$NEW_SRC" || true)"
+DIFFOUT="$OUTDIR/build_rs.diff"; : > "$DIFFOUT"
 if [ -n "$NEW_BS" ]; then
   OLD_BS="$(build_rs_path "$OLD_SRC" || true)"
   alarm=0
@@ -72,12 +76,14 @@ if [ -n "$NEW_BS" ]; then
     else
       add_finding high build-script "new version ADDED a build script (build.rs runs arbitrary code on your build machine at compile time)"
     fi
+    { printf '# NEW build script (%s), first 60 lines:\n' "$(basename "$NEW_BS")"; sed -n '1,60p' "$NEW_BS"; } > "$DIFFOUT" 2>/dev/null || true
   elif ! cmp -s "$OLD_BS" "$NEW_BS"; then
     if [ "$alarm" -eq 1 ]; then
       add_finding critical build-script "build script CHANGED and references process / network / fs APIs (compile-time code — review the diff)"
     else
       add_finding high build-script "build script content CHANGED (compile-time code — review the diff)"
     fi
+    { diff -u "$OLD_BS" "$NEW_BS" 2>/dev/null || true; } | sed -n '1,60p' > "$DIFFOUT" || true
   fi
 fi
 
