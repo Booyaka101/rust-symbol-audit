@@ -29,24 +29,34 @@ BODY="${BODY_FILE:-$WORK/comment_body.md}"
 if [ -z "${BODY_FILE:-}" ]; then
   OVERALL_TIER="${OVERALL_TIER:-none}"
   CRATE_COUNT="${CRATE_COUNT:-0}"
+  FLAGGED_COUNT="${FLAGGED_COUNT:-0}"
+  ADVISORY_COUNT="${ADVISORY_COUNT:-0}"
+  RECOMMENDATION="${RECOMMENDATION:-review}"
+  crate="${OVERALL_CRATE:-a dependency}"
+  reason="${OVERALL_REASON:-changed its capability surface}"
   case "$OVERALL_TIER" in
-    critical) verdict="🔴 **CRITICAL** — a dependency gained process-exec / raw-socket / syscall / build-time-code capability" ;;
-    high)     verdict="🟠 **HIGH** — a dependency gained filesystem / env / secret-handling / build-time-code capability" ;;
-    medium)   verdict="🟡 **MEDIUM** — a dependency gained network (http/tls/dns) capability" ;;
-    none)     verdict="🟢 no sensitive new capabilities detected" ;;
+    critical) verdict="🔴 **CRITICAL** — \`$crate\` $reason" ;;
+    high)     verdict="🟠 **HIGH** — \`$crate\` $reason" ;;
+    medium)   verdict="🟡 **MEDIUM** — \`$crate\` $reason" ;;
+    none)     verdict="🟢 **CLEAR** — no sensitive dependency changes detected" ;;
     *)        verdict="$OVERALL_TIER" ;;
   esac
+  # pluralize the advisory count
+  if [ "$ADVISORY_COUNT" = "1" ]; then adv_word="advisory"; else adv_word="advisories"; fi
   {
     printf '%s\n' "$RSA_MARKER"
-    printf '## 🛡️ rust-symbol-audit — %s\n\n' "$verdict"
-    printf 'Diffed **v0-demangled Rust symbols** and inspected **build scripts / proc-macros / dependency trees** between the old and new versions of **%s** dependency crate(s) changed by this PR.\n\n' "$CRATE_COUNT"
+    printf '## 🛡️ rust-symbol-audit\n\n'
+    printf '%s\n\n' "$verdict"
+    printf '`%s` audited · `%s` flagged · `%s` %s · recommendation **%s**\n\n' \
+      "$CRATE_COUNT" "$FLAGGED_COUNT" "$ADVISORY_COUNT" "$adv_word" "$RECOMMENDATION"
     if [ -n "${SECTIONS_FILE:-}" ] && [ -s "${SECTIONS_FILE:-/nonexistent}" ]; then
+      printf -- '---\n\n'
       cat "$SECTIONS_FILE"
     fi
-    printf '\n---\n'
-    printf '<sub>Tiers: 🔴 critical (exec/spawn/raw-socket/syscall/FFI/build-time code) · 🟠 high (fs/env/secrets/proc-macro) · 🟡 medium (http/tls/dns/net/new deps). '
-    printf 'Symbols shown are present in the new crate version but not the old, after v0 demangling; source findings come from build.rs / manifest inspection. '
-    printf 'A flag is a prompt to review, not proof of malice. Tune out known-benign signals via `.rust-symbol-audit.toml`.</sub>\n'
+    printf -- '---\n'
+    printf '<sub>Five lanes: symbols (v0-demangled rlib diff) · compile-time (build.rs/proc-macro) · dependencies · provenance (crates.io) · advisories (RustSec/OSV). '
+    printf 'Tiers: 🔴 critical · 🟠 high · 🟡 medium. A flag is a prompt to review, not proof of malice. '
+    printf 'Suppress known-benign signals via `.rust-symbol-audit.toml`; sign off a reviewed version in `.rust-symbol-audit/reviews.toml`.</sub>\n'
   } > "$BODY"
 else
   # Ensure a pre-assembled body still carries the marker so it stays sticky.

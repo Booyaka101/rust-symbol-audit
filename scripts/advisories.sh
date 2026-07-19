@@ -52,21 +52,53 @@ except Exception:
 def cvss_score(v):
     best = 0.0
     for s in (v.get("severity") or []):
-        sc = s.get("score", "")
-        # numeric score or CVSS vector; try to pull a trailing number
         try:
-            best = max(best, float(sc))
+            best = max(best, float(s.get("score", "")))
         except (TypeError, ValueError):
-            pass
+            pass  # CVSS vector string, not a number — leave best as-is
     return best
 
+def ids_of(v):
+    return [i for i in ([v.get("id")] + (v.get("aliases") or [])) if i]
+
+# Group a vuln and its aliases (e.g. a RUSTSEC id + its GHSA id) into one finding
+# so the same advisory isn't listed twice.
+groups, seen = [], {}
 for v in (data.get("vulns") or []):
-    vid = v.get("id", "advisory")
+    idset = set(ids_of(v))
+    gi = next((seen[i] for i in idset if i in seen), None)
+    if gi is None:
+        gi = len(groups); groups.append({"ids": set(), "summary": "", "worst": 0.0})
+    g = groups[gi]
+    g["ids"] |= idset
+    for i in idset:
+        seen[i] = gi
     summ = (v.get("summary") or v.get("details") or "").strip().replace("\n", " ")
-    if len(summ) > 140:
-        summ = summ[:137] + "..."
-    tier = "critical" if cvss_score(v) >= 9.0 else "high"
-    print("%s\tadvisory\t%s: %s" % (tier, vid, summ))
+    if summ and not g["summary"]:
+        g["summary"] = summ
+    g["worst"] = max(g["worst"], cvss_score(v))
+
+def url_for(i):
+    if i.startswith("RUSTSEC-"): return "https://rustsec.org/advisories/%s.html" % i
+    if i.startswith("GHSA-"):    return "https://github.com/advisories/%s" % i
+    if i.startswith("CVE-"):     return "https://nvd.nist.gov/vuln/detail/%s" % i
+    return "https://osv.dev/vulnerability/%s" % i
+
+def rank_id(i):
+    return (0 if i.startswith("RUSTSEC-") else 1 if i.startswith("CVE-")
+            else 2 if i.startswith("GHSA-") else 3, i)
+
+for g in groups:
+    ids = sorted(g["ids"], key=rank_id)
+    if not ids:
+        continue
+    primary, aliases = ids[0], ids[1:]
+    summ = g["summary"] or "(no summary)"
+    if len(summ) > 120:
+        summ = summ[:117] + "..."
+    tier = "critical" if g["worst"] >= 9.0 else "high"
+    alias_str = " (aka %s)" % ", ".join(aliases) if aliases else ""
+    print("%s\tadvisory\t[%s](%s)%s — %s" % (tier, primary, url_for(primary), alias_str, summ))
 PY
 
 overall="none"

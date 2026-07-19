@@ -4,6 +4,20 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] — 2026-07-19
+
+### Changed (comment presentation)
+- **Accurate verdict headline.** The top line now names the crate and the *actual*
+  dominant reason (e.g. "`smallvec` has a known security advisory (RUSTSEC-…)")
+  instead of a fixed per-tier sentence that could misdescribe why the tier is what
+  it is.
+- **Summary line** with counts: crates audited · flagged · advisories · recommendation.
+- **Flagged crates first**, sorted by severity; clean/unchanged crates fold into a
+  collapsed "N with no flagged findings" `<details>` so the important one stands out.
+- **Newly-added crates** render as `new → x.y.z` (not `— → x.y.z`).
+- **Advisories deduped and linked** — a RUSTSEC id and its GHSA alias collapse into
+  one linked entry (`[RUSTSEC-…](…) (aka GHSA-…) — summary`).
+
 ## [3.0.1] — 2026-07-19
 
 ### Fixed
@@ -113,6 +127,7 @@ capabilities as a PR comment.
 - **Consumer example** (`examples/pr-audit.yml`) and docs (`README.md`,
   `TESTING.md`).
 
+[3.0.2]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.2
 [3.0.1]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.1
 [3.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.0
 [2.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v2.0.0
