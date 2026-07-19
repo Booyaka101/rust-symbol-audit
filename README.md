@@ -1,7 +1,14 @@
 # rust-symbol-audit
 
+[![Release](https://img.shields.io/github/v/release/Booyaka101/rust-symbol-audit?sort=semver&color=orange)](https://github.com/Booyaka101/rust-symbol-audit/releases)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-rust--symbol--audit-2ea44f?logo=github)](https://github.com/marketplace/actions/rust-symbol-audit)
+[![License: MIT](https://img.shields.io/github/license/Booyaka101/rust-symbol-audit?color=blue)](LICENSE)
+
 A GitHub Action that turns a Rust dependency bump into a **capability-creep
-review you can actually gate on**. On PRs that change `Cargo.lock`, for every
+review you can actually gate on**.
+
+> **See it in action →** a live demo PR where it catches a real advisory and folds
+> away the clean bump: **[rust-symbol-audit-demo #1](https://github.com/Booyaka101/rust-symbol-audit-demo/pull/1)**. On PRs that change `Cargo.lock`, for every
 crate whose version changed it runs five checks, merges them into one **sticky PR
 comment**, and — once you've signed a version off — only ever alarms again on the
 **unreviewed delta**.
