@@ -1,5 +1,5 @@
 name: "rust-symbol-audit"
-description: "On dependency-change PRs, diff v0-demangled Rust symbols between old and new crate versions and flag risky new capabilities (exec, sockets, fs, secrets) as a PR comment."
+description: "A capability-creep triage gate for Rust dependency PRs: diff symbols, inspect build.rs, check advisories & provenance."
 author: "booyaka101"
 branding:
   icon: "shield"
