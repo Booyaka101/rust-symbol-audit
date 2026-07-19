@@ -4,6 +4,18 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] — 2026-07-19
+
+### Fixed
+- **Newly-added crates were mis-parsed.** `run_audit.sh` read the lockdiff TSV with
+  `IFS=$'\t' read`, which collapses the consecutive tabs in a newly-added row
+  (`name<TAB><TAB>version`, empty old version) — shifting the version into the old
+  field and leaving the new version empty. The crate was then audited with no new
+  version, so its build/advisory lanes were skipped. Now split tabs manually to
+  preserve empty fields. Found by the live smoke test (a newly-added `smallvec`
+  with a known advisory showed no finding); covered by a regression test. Suite is
+  now 48 checks.
+
 ## [3.0.0] — 2026-07-19
 
 Makes the tool a **gate you can block merges on**: a stateful review ledger
@@ -101,6 +113,7 @@ capabilities as a PR comment.
 - **Consumer example** (`examples/pr-audit.yml`) and docs (`README.md`,
   `TESTING.md`).
 
+[3.0.1]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.1
 [3.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.0
 [2.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v2.0.0
 [1.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v1.0.0

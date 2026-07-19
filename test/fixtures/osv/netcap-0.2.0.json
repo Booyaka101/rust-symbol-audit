@@ -1,0 +1,11 @@
+{
+  "vulns": [
+    {
+      "id": "RUSTSEC-2099-9999",
+      "summary": "netcap test advisory (fixture) — exercises the advisory lane on a newly-added crate",
+      "severity": [
+        { "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }
+      ]
+    }
+  ]
+}

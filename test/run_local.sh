@@ -355,6 +355,25 @@ have "$R2WORK/norm.txt" 'REVIEW.*bar.*2.0.0.*ACCEPT.*hyper' && ok "per-capabilit
 echo
 
 # ===========================================================================
+echo "### TEST S — newly-added crate (empty old version) parses correctly + advisory fires"
+# Regression for the IFS=tab field-collapse bug: a lockdiff row 'name<TAB><TAB>ver'
+# must audit as old=<none> new=ver (not old=ver new=<empty>), so the build and
+# advisory lanes actually run for newly-added crates.
+export RSA_FIXTURES="$FIX"
+SSWORK="$WORK/s"; mkdir -p "$SSWORK"
+printf 'netcap\t\t0.2.0\n' > "$SSWORK/lockdiff.tsv"
+LOCKDIFF_TSV="$SSWORK/lockdiff.tsv" WORK="$SSWORK/run" REVIEWS="/nonexistent" \
+  RSA_CHECK_PROVENANCE=0 RSA_ADVISORY_FIXTURE="$FIX/osv" RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$SSWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$SSWORK/run.log"
+have "$SSWORK/run.log" 'auditing netcap : <new> -> 0.2.0' \
+  && ok "newly-added crate audited as old=<none> new=0.2.0 (empty-field bug fixed)" \
+  || bad "newly-added crate misparsed: $(grep -o 'auditing netcap : .*' "$SSWORK/run.log" | head -1)"
+have "$SSWORK/run/comment_body.md" 'RUSTSEC-2099-9999' \
+  && ok "advisory lane fired for the newly-added crate (new version reached it)" \
+  || bad "advisory not shown for newly-added crate"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

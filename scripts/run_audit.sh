@@ -79,7 +79,16 @@ OVERALL="none"; CRATES_DONE=0; INDEX=0
 BUILD_SCRIPT_CHANGES=0; ADVISORY_COUNT=0
 FLAGGED=""; NOTAUDITED=""
 
-while IFS=$'\t' read -r name oldv newv; do
+# NB: read the whole line and split on tab MANUALLY. `IFS=$'\t' read a b c`
+# collapses consecutive tabs (tab is IFS-whitespace), so a newly-added crate
+# row `name<TAB><TAB>version` (empty old version) would shift version into `oldv`
+# and leave `newv` empty — skipping the build/advisory lanes for new crates.
+while IFS= read -r _line || [ -n "$_line" ]; do
+  [ -n "$_line" ] || continue
+  name="${_line%%$'\t'*}"
+  _rest="${_line#*$'\t'}"
+  oldv="${_rest%%$'\t'*}"
+  newv="${_rest#*$'\t'}"
   [ -n "${name:-}" ] || continue
   INDEX=$((INDEX + 1))
   if [ "$INDEX" -gt "$MAX_CRATES" ]; then
