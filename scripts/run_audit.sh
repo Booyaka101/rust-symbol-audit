@@ -242,7 +242,7 @@ while IFS= read -r _line || [ -n "$_line" ]; do
 
   # render the crate's full section to its own file --------------------------
   {
-    printf '### %s `%s` %s — **%s**\n\n' "$emoji" "$name" "$verstr" "$tierlabel"
+    printf '### %s [`%s`](https://crates.io/crates/%s) %s — **%s**\n\n' "$emoji" "$name" "$name" "$verstr" "$tierlabel"
 
     if [ "$FULLY_REVIEWED" -eq 1 ]; then
       printf '> ✅ Signed off in the review ledger%s — capability findings suppressed; advisories & provenance still checked.\n\n' \
@@ -327,7 +327,7 @@ if [ -s "$WORK/clean.list" ]; then
     while IFS=$'\t' read -r nm ov nv rv; do
       if [ "$ov" = "—" ]; then vs="new → \`$nv\`"; else vs="\`$ov\` → \`$nv\`"; fi
       [ "$rv" = "1" ] && note=" — reviewed ✅" || note=""
-      printf -- '- `%s` %s%s\n' "$nm" "$vs" "$note"
+      printf -- '- [`%s`](https://crates.io/crates/%s) %s%s\n' "$nm" "$nm" "$vs" "$note"
     done < "$WORK/clean.list"
     printf '\n</details>\n\n'
   } >> "$SECTIONS"

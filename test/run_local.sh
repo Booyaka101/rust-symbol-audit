@@ -408,6 +408,24 @@ have "$UWORK/out.txt" 'tier=critical'                        && ok "outputs stil
 echo
 
 # ===========================================================================
+echo "### TEST V — crate names link to crates.io (issue #3)"
+export RSA_FIXTURES="$FIX"
+VWORK="$WORK/v"; mkdir -p "$VWORK"
+# flagged crate -> linked section header
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$VWORK/f" REVIEWS="/nonexistent" RSA_DRY_RUN=1 PR_NUMBER="" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 GITHUB_OUTPUT="$VWORK/f_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$VWORK/f.log"
+have "$VWORK/f/comment_body.md" 'https://crates.io/crates/netcap' && ok "flagged crate header links to crates.io" || bad "no crates.io link in flagged header"
+# reviewed (clean) crate -> collapsed clean-list, also linked
+printf '[[review]]\ncrate = "netcap"\nversion = "0.2.0"\nreviewed_by = "carol"\n' > "$VWORK/reviews.toml"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$VWORK/c" REVIEWS="$VWORK/reviews.toml" RSA_DRY_RUN=1 PR_NUMBER="" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 GITHUB_OUTPUT="$VWORK/c_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$VWORK/c.log"
+have "$VWORK/c/comment_body.md" 'no flagged findings'            && ok "clean crate folded into collapsed list" || bad "clean crate not collapsed"
+have "$VWORK/c/comment_body.md" 'https://crates.io/crates/netcap' && ok "clean-list crate links to crates.io"   || bad "no crates.io link in clean list"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"
