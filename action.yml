@@ -25,6 +25,10 @@ inputs:
     description: "Path (repo-relative) to the review ledger. Signing off a (crate, version) makes future bumps alarm only on the unreviewed capability delta."
     required: false
     default: ".rust-symbol-audit/reviews.toml"
+  vet:
+    description: "Path to a cargo-vet supply-chain/audits.toml. Its certified versions are imported as sign-offs (interop with cargo-vet). Ignored if the file is absent."
+    required: false
+    default: "supply-chain/audits.toml"
   check-provenance:
     description: "Query crates.io for publisher / source-repo / yank changes (needs network). Set to 'false' to disable."
     required: false
@@ -118,6 +122,7 @@ runs:
         FAIL_ON: ${{ inputs.fail-on }}
         RSA_CONFIG: ${{ inputs.config }}
         REVIEWS: ${{ inputs.reviews }}
+        VET_AUDITS: ${{ inputs.vet }}
         RSA_CHECK_PROVENANCE: ${{ inputs.check-provenance == 'false' && '0' || '1' }}
         RSA_CHECK_ADVISORIES: ${{ inputs.check-advisories == 'false' && '0' || '1' }}
         RSA_COMMENT: ${{ inputs.comment }}

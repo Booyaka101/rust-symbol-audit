@@ -40,11 +40,18 @@ if [ -f "$RSA_CONFIG" ]; then
   python3 "$HERE/read_config.py" "$RSA_CONFIG" > "$CONFIG_NORM" 2>/dev/null || : > "$CONFIG_NORM"
   log "run_audit: config $RSA_CONFIG -> $(count_lines "$CONFIG_NORM") rule(s)"
 fi
-# --- review ledger ---------------------------------------------------------
+# --- review ledger + cargo-vet import --------------------------------------
 REVIEWS_NORM="$WORK/reviews.norm"; : > "$REVIEWS_NORM"
 if [ -f "$REVIEWS" ]; then
   python3 "$HERE/read_reviews.py" "$REVIEWS" > "$REVIEWS_NORM" 2>/dev/null || : > "$REVIEWS_NORM"
   log "run_audit: ledger $REVIEWS -> $(count_lines "$REVIEWS_NORM") sign-off(s)"
+fi
+# cargo-vet interop: treat existing supply-chain/audits.toml certifications as
+# sign-offs too (appended to the same normalized ledger).
+VET_AUDITS="${VET_AUDITS:-supply-chain/audits.toml}"
+if [ -f "$VET_AUDITS" ]; then
+  python3 "$HERE/read_vet.py" "$VET_AUDITS" >> "$REVIEWS_NORM" 2>/dev/null || true
+  log "run_audit: + cargo-vet $VET_AUDITS -> $(count_lines "$REVIEWS_NORM") total sign-off(s)"
 fi
 
 is_ignored() { awk -F'\t' -v c="$1" '$1=="IGNORE"&&$2==c{f=1} END{exit !f}' "$CONFIG_NORM"; }

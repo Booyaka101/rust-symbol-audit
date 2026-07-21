@@ -56,6 +56,11 @@ crate (or run `scripts/review.sh <crate> <version>`), so approving a bump is one
 paste. Crucially, a sign-off suppresses **only** the capability lanes — a later
 **advisory or provenance change is never hidden by an old review**.
 
+Already using [**cargo-vet**](https://mozilla.github.io/cargo-vet/)? Its
+`supply-chain/audits.toml` certifications are imported automatically as sign-offs
+(configurable via the `vet` input), so versions your team already vetted stay
+green with no extra work.
+
 > **What this is — and isn't.** A *triage gate*, not a sandbox or a proof. It
 > reliably surfaces the realistic "this dependency's surface changed — look" case
 > and is quiet enough to keep on. It does **not** catch capability reached only
@@ -99,6 +104,7 @@ the `recommendation` output).
 | `fail-on` | `none` | Fail the check at `medium`/`high`/`critical`. `none` = advisory only. |
 | `config` | `.rust-symbol-audit.toml` | Allow/ignore rules to suppress known-benign signals. |
 | `reviews` | `.rust-symbol-audit/reviews.toml` | The review ledger (the ratchet). |
+| `vet` | `supply-chain/audits.toml` | A [cargo-vet](https://mozilla.github.io/cargo-vet/) audits file, if present — its certified versions are imported as sign-offs. |
 | `check-provenance` | `true` | Query crates.io for publisher/repo/yank changes (needs network). |
 | `check-advisories` | `true` | Query OSV.dev for RustSec advisories (needs network). |
 | `comment` | `true` | Post the report as a PR comment. `false` = summary-only mode (still writes the job summary, sets outputs, and can `fail-on`). |

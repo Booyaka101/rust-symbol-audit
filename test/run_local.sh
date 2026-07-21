@@ -466,6 +466,22 @@ have "$WORK/w/out2.txt" 'changed=false' && ok "default root path unchanged (no r
 echo
 
 # ===========================================================================
+echo "### TEST X — cargo-vet audits.toml imported as ledger sign-offs (issue #5)"
+export RSA_FIXTURES="$FIX"
+XWORK="$WORK/x"; mkdir -p "$XWORK"
+python3 "$SCRIPTS/read_vet.py" "$FIX/vet/audits.toml" > "$XWORK/norm.txt" 2>"$XWORK/x.log"
+echo "  --- normalized cargo-vet ---"; sed 's/^/    /' "$XWORK/norm.txt"
+have "$XWORK/norm.txt" 'REVIEW.*netcap.*0.2.0.*ALL'    && ok "vet version audit -> sign-off (netcap 0.2.0)"        || bad "version audit not imported"
+have "$XWORK/norm.txt" 'REVIEW.*somecrate.*1.0.1.*ALL' && ok "vet delta audit -> sign-off of the target (1.0.1)"   || bad "delta audit target not imported"
+# integration: a cargo-vet sign-off suppresses capability findings (no reviews.toml)
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$XWORK/run" REVIEWS="/nonexistent" VET_AUDITS="$FIX/vet/audits.toml" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$XWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$XWORK/run.log"
+have "$XWORK/out.txt" 'tier=none' && ok "cargo-vet sign-off suppresses capability findings (tier none)" \
+  || bad "expected tier=none ($(grep '^tier=' "$XWORK/out.txt" 2>/dev/null))"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

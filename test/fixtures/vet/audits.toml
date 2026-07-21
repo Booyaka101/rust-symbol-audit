@@ -1,0 +1,11 @@
+# cargo-vet audits fixture — exercised by read_vet.py / TEST X.
+
+[[audits.netcap]]
+version = "0.2.0"
+criteria = "safe-to-deploy"
+who = "Alice <alice@example.com>"
+
+[[audits.somecrate]]
+delta = "1.0.0 -> 1.0.1"
+criteria = ["safe-to-run"]
+who = "Bob <bob@example.com>"
