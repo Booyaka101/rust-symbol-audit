@@ -77,8 +77,8 @@ PR_NUMBER="${PR_NUMBER:-}"
 have_gh=0
 command -v gh >/dev/null 2>&1 && have_gh=1
 
-if [ "${RSA_DRY_RUN:-0}" = "1" ] || [ -z "$PR_NUMBER" ] || [ "$have_gh" -eq 0 ]; then
-  log "post_comment: DRY RUN (RSA_DRY_RUN=${RSA_DRY_RUN:-0}, pr='${PR_NUMBER}', gh=$have_gh) — not posting."
+if [ "${RSA_COMMENT:-true}" = "false" ] || [ "${RSA_DRY_RUN:-0}" = "1" ] || [ -z "$PR_NUMBER" ] || [ "$have_gh" -eq 0 ]; then
+  log "post_comment: not posting a PR comment (comment=${RSA_COMMENT:-true}, RSA_DRY_RUN=${RSA_DRY_RUN:-0}, pr='${PR_NUMBER}', gh=$have_gh). Job summary + outputs still apply."
   log "----- comment body -----"
   cat "$BODY"
   log "------------------------"

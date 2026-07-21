@@ -394,6 +394,20 @@ have "$TTWORK/risk.tsv" 'Capturer' && ok "screen capture (scrap) flagged" || bad
 echo
 
 # ===========================================================================
+echo "### TEST U — comment=false: summary-only mode (issue #2)"
+export RSA_FIXTURES="$FIX"
+UWORK="$WORK/u"; mkdir -p "$UWORK"
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$UWORK/run" REVIEWS="/nonexistent" PR_NUMBER="999" RSA_COMMENT=false \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 GITHUB_STEP_SUMMARY="$UWORK/summary.md" GITHUB_OUTPUT="$UWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$UWORK/run.log"
+URC=$?
+[ "$URC" -eq 0 ] && ok "run completes cleanly with comment=false (no post attempt)" || bad "run_audit exit $URC with comment=false"
+have "$UWORK/summary.md" 'rust-symbol-audit'                 && ok "job summary still written in summary-only mode" || bad "job summary not written"
+have "$UWORK/run.log" 'not posting a PR comment .comment=false' && ok "logged the comment=false skip"               || bad "no comment=false skip log"
+have "$UWORK/out.txt" 'tier=critical'                        && ok "outputs still set in summary-only mode"         || bad "tier output missing"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"
