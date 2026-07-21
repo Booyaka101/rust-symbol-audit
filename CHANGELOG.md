@@ -4,6 +4,29 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] — 2026-07-19
+
+Feature round bundling five merged issues. Backward-compatible; new inputs default
+to prior behavior.
+
+### Added
+- **`comment` input** (#2) — `comment: "false"` gives summary-only mode: the job
+  summary and outputs (and `fail-on`) still apply, only the PR comment is skipped.
+- **`manifest-dir` input** (#4) — watch a `Cargo.lock` outside the repo root
+  (monorepos / non-root workspaces, e.g. `backend/Cargo.lock`).
+- **cargo-vet interop** (#5) — a `vet` input; certified versions in a
+  `supply-chain/audits.toml` are imported as review-ledger sign-offs
+  (`read_vet.py`), so cargo-vet users get the ratchet for free.
+- **New capability patterns** (#1) — the high tier now flags clipboard
+  (`arboard`/`copypasta`), input capture / keylogging (`rdev`/`enigo`/
+  `device_query`/`GetAsyncKeyState`/`SetWindowsHookEx`), and screen/camera/mic
+  capture (`scrap`/`xcap`/`nokhwa`/`screenshots`/`cpal`).
+
+### Changed
+- **Crate names link to crates.io** (#3) in the PR comment (flagged headers and
+  the collapsed clean list).
+- Local suite grown to **65 checks** (was 46), covering all of the above.
+
 ## [3.0.2] — 2026-07-19
 
 ### Changed (comment presentation)
@@ -127,6 +150,7 @@ capabilities as a PR comment.
 - **Consumer example** (`examples/pr-audit.yml`) and docs (`README.md`,
   `TESTING.md`).
 
+[3.1.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.1.0
 [3.0.2]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.2
 [3.0.1]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.1
 [3.0.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.0
