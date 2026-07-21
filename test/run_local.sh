@@ -375,6 +375,25 @@ have "$SSWORK/run/comment_body.md" 'RUSTSEC-2099-9999' \
 echo
 
 # ===========================================================================
+echo "### TEST T — capability patterns: clipboard / input-device / screen-capture (issue #1)"
+TTWORK="$WORK/t"; mkdir -p "$TTWORK"
+cat > "$TTWORK/syms.txt" <<'SYMS'
+arboard::Clipboard::set_text
+<enigo::Enigo>::key_click
+scrap::Capturer::frame
+<nokhwa::Camera>::frame
+cpal::traits::DeviceTrait::default_input_config
+SYMS
+"$SCRIPTS/risk_check.sh" "$TTWORK/syms.txt" "$TTWORK" >/dev/null 2>"$TTWORK/t.log"
+echo "  --- risk.tsv ---"; sed 's/^/    /' "$TTWORK/risk.tsv" 2>/dev/null
+TTIER="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["tier"])' "$TTWORK/risk.json" 2>/dev/null || echo none)"
+[ "$TTIER" = "high" ] && ok "clipboard/input/capture symbols tier HIGH" || bad "expected high, got '$TTIER'"
+have "$TTWORK/risk.tsv" 'arboard'  && ok "clipboard (arboard) flagged"    || bad "arboard not flagged"
+have "$TTWORK/risk.tsv" 'enigo'    && ok "input device (enigo) flagged"   || bad "enigo not flagged"
+have "$TTWORK/risk.tsv" 'Capturer' && ok "screen capture (scrap) flagged" || bad "scrap/Capturer not flagged"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"
