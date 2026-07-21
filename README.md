@@ -102,6 +102,7 @@ the `recommendation` output).
 | `check-provenance` | `true` | Query crates.io for publisher/repo/yank changes (needs network). |
 | `check-advisories` | `true` | Query OSV.dev for RustSec advisories (needs network). |
 | `comment` | `true` | Post the report as a PR comment. `false` = summary-only mode (still writes the job summary, sets outputs, and can `fail-on`). |
+| `manifest-dir` | `.` | Directory holding the `Cargo.lock` to watch, for monorepos / non-root workspaces (e.g. `backend`). Also point the workflow's `paths:` filter at `<dir>/Cargo.lock`. |
 
 ### Outputs
 
