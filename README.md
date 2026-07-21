@@ -101,6 +101,7 @@ the `recommendation` output).
 | `reviews` | `.rust-symbol-audit/reviews.toml` | The review ledger (the ratchet). |
 | `check-provenance` | `true` | Query crates.io for publisher/repo/yank changes (needs network). |
 | `check-advisories` | `true` | Query OSV.dev for RustSec advisories (needs network). |
+| `comment` | `true` | Post the report as a PR comment. `false` = summary-only mode (still writes the job summary, sets outputs, and can `fail-on`). |
 
 ### Outputs
 
