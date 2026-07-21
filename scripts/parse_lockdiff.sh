@@ -23,6 +23,15 @@ OUT="${3:-${LOCKDIFF_TSV:-/tmp/rsa/lockdiff.tsv}}"
 mkdir -p "$(dirname "$OUT")"
 : > "$OUT"
 
+# The lockfile to watch. Defaults to the repo-root Cargo.lock; set MANIFEST_DIR
+# (action input `manifest-dir`) to a subdirectory for monorepos / non-root
+# workspaces, e.g. MANIFEST_DIR=backend -> backend/Cargo.lock.
+MANIFEST_DIR="${MANIFEST_DIR:-.}"
+case "$MANIFEST_DIR" in
+  "" | ".") LOCKPATH="Cargo.lock" ;;
+  *)        LOCKPATH="${MANIFEST_DIR%/}/Cargo.lock" ;;
+esac
+
 if [ -z "$BASE_SHA" ]; then
   log "no base SHA provided — nothing to diff"
   set_output "changed=false"; set_output "count=0"
@@ -35,16 +44,16 @@ if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
 fi
 
 # No Cargo.lock change at all -> silent success.
-if git diff --quiet "$BASE_SHA" "$HEAD_REF" -- Cargo.lock 2>/dev/null; then
-  log "Cargo.lock unchanged between $BASE_SHA and $HEAD_REF"
+if git diff --quiet "$BASE_SHA" "$HEAD_REF" -- "$LOCKPATH" 2>/dev/null; then
+  log "$LOCKPATH unchanged between $BASE_SHA and $HEAD_REF"
   set_output "changed=false"; set_output "count=0"
   exit 0
 fi
 
-# Print "name<TAB>version" for every [[package]] block in a given ref's Cargo.lock.
+# Print "name<TAB>version" for every [[package]] block in a given ref's lockfile.
 pkgmap() {
   local ref="$1"
-  git show "${ref}:Cargo.lock" 2>/dev/null | awk '
+  git show "${ref}:${LOCKPATH}" 2>/dev/null | awk '
     /^\[\[package\]\]/            { name=""; ver=""; inpkg=1; next }
     /^\[/ && $0 !~ /^\[\[package\]\]/ { inpkg=0 }
     inpkg && /^name = / {
