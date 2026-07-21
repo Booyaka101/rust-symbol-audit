@@ -7,7 +7,8 @@
 #
 # Tiers (checked in this precedence; first match wins):
 #   critical — process spawn/exec, raw sockets, syscalls / FFI, mem-injection
-#   high     — filesystem access, environment access, secret-ish identifiers
+#   high     — filesystem, env, secret-ish identifiers, clipboard / input-device
+#              (keylogging) / screen-camera-mic capture
 #   medium   — higher-level networking (http/tls/dns), socket addressing
 #
 # Usage: risk_check.sh <added_syms_file> [out_dir]
@@ -28,7 +29,7 @@ JSON="$OUTDIR/risk.json"
 # words like "sys"/"net" are avoided because std routes almost everything through
 # std::sys internally and would flag every symbol).
 CRIT='Command>|::exec|execv|execvp|thread::spawn|::spawn|process::exit|process::abort|TcpStream|TcpListener|UdpSocket|::syscall|libc::|::ptrace|CreateProcess|CreateRemoteThread|VirtualAllocEx|WriteProcessMemory|LoadLibrary|dlopen|mmap|mprotect'
-HIGH='::fs::|std::fs|File>|OpenOptions|read_to_string|write_all|::remove_file|remove_dir|create_dir|::env::var|env::set_var|::set_var|remove_var|home_dir|temp_dir|::token|secret|password|passwd|credential|private_key|api[_-]?key|::ssh|keychain'
+HIGH='::fs::|std::fs|File>|OpenOptions|read_to_string|write_all|::remove_file|remove_dir|create_dir|::env::var|env::set_var|::set_var|remove_var|home_dir|temp_dir|::token|secret|password|passwd|credential|private_key|api[_-]?key|::ssh|keychain|arboard|copypasta|clipboard::|Clipboard>|rdev::|enigo::|device_query|GetAsyncKeyState|SetWindowsHookEx|scrap::|xcap::|nokhwa|screenshots::|::Capturer|cpal::'
 MED='::net::|SocketAddr|to_socket_addrs|lookup_host|::http|https|::tls|rustls|reqwest|hyper|openssl|native_tls|webpki|ureq|::dns|resolve|Url>|url::Url'
 
 overall="none"
