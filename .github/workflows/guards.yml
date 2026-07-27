@@ -12,6 +12,9 @@ on:
 
 permissions:
   contents: read
+  # ghas-free-pack uploads SARIF to code scanning and posts a PR comment.
+  security-events: write
+  pull-requests: write
 
 jobs:
   guards:
@@ -24,3 +27,10 @@ jobs:
         with:
           mode: warn
 
+      # Shell/Dockerfile/Terraform/PHP — the file types GitHub gated behind paid
+      # Advanced Security. Reports without gating, like the other guards.
+      - name: Free GHAS-equivalent scan
+        continue-on-error: true
+        uses: Booyaka101/ghas-free-pack@v1
+        with:
+          github-token: ${{ github.token }}
