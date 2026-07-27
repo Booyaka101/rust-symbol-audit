@@ -1,0 +1,27 @@
+version: 2
+
+# Staying current is a standing requirement here, so it is automated rather than
+# remembered. Both ecosystems this repo actually depends on are covered:
+# npm (js-yaml) and the actions used by CI and by the dogfood job.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      all-dependencies:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'chore(ci)'
+    groups:
+      all-actions:
+        patterns: ['*']
