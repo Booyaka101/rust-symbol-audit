@@ -9,7 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Toolchain versions
         run: |
@@ -19,7 +19,7 @@ jobs:
           python3 --version
 
       - name: Cache cargo registry + rustfilt
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/rustfilt

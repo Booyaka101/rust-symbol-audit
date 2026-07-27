@@ -84,7 +84,7 @@ runs:
         cargo --version
 
     - name: Cache rustfilt + cargo registry
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/rustfilt
@@ -136,7 +136,7 @@ runs:
 
     - name: Upload audit evidence report
       if: steps.parse.outputs.changed == 'true' && steps.audit.outputs.report != ''
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: rust-symbol-audit-report
         path: ${{ runner.temp }}/rsa/audit-report.json

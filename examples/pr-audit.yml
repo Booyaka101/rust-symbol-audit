@@ -20,7 +20,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # base.sha must be reachable to diff the lockfile; full history is the
           # simplest guarantee. (The action also best-effort-fetches base.sha,
