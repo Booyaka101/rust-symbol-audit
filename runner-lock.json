@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "label": "ubuntu-24.04",
+  "imageOS": "ubuntu24",
+  "imageVersion": "20260720.247.2",
+  "tools": {
+    "Python": {
+      "versions": [
+        "3.12.3"
+      ],
+      "source": "manifest"
+    }
+  },
+  "updatedAt": "2026-08-05T04:23:01.485Z"
+}

@@ -21,6 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Our own tool. Locks the runner image's tool versions and diffs them when
+      # GitHub bumps the image — including when a floating label like
+      # ubuntu-latest silently re-points. Report-only; no fail-on yet.
+      - name: Runner image drift
+        uses: Booyaka101/runner-drift@v1
 
       - name: pnpm v11 CI guard
         uses: Booyaka101/pnpm11-ci-guard@v1
