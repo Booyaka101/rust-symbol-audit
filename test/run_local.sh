@@ -39,6 +39,13 @@ echo "  old rlib: ${OLD_RLIB:-<none>}"
 echo "  new rlib: ${NEW_RLIB:-<none>}"
 [ -f "$OLD_RLIB" ] && ok "old fixture built" || bad "old fixture build (see $WORK/a_old.log)"
 [ -f "$NEW_RLIB" ] && ok "new fixture built" || bad "new fixture build (see $WORK/a_new.log)"
+# Both probes share one target dir, so both versions' rlibs land in the same
+# deps/ and the filename stops identifying a version. Picking the wrong one
+# would not fail anything here -- it would quietly audit a version twice.
+[ "$OLD_RLIB" != "$NEW_RLIB" ] && ok "shared target dir still resolves the two versions apart" \
+                               || bad "both versions resolved to one rlib: $NEW_RLIB"
+[ "$(dirname "$OLD_RLIB")" = "$(dirname "$NEW_RLIB")" ] && ok "both probes did share one target dir" \
+                                                        || bad "probes did not share a target dir"
 
 "$SCRIPTS/diff_symbols.sh" "$OLD_RLIB" "$NEW_RLIB" "$WORK/a" >/dev/null 2>>"$WORK/a_diff.log"
 ADDED="$WORK/a/added_syms.txt"

@@ -12,7 +12,7 @@
 # lanes; advisories/provenance are never hidden by a stale sign-off.
 #
 # Env: LOCKDIFF_TSV WORK MAX_CRATES FAIL_ON RSA_CONFIG REVIEWS PR_NUMBER PR_AUTHOR
-#      RSA_CHECK_PROVENANCE RSA_CHECK_ADVISORIES GH_TOKEN RSA_DRY_RUN
+#      RSA_CHECK_PROVENANCE RSA_CHECK_ADVISORIES GH_TOKEN RSA_DRY_RUN RSA_TARGET_DIR
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
@@ -25,6 +25,9 @@ FAIL_ON="${FAIL_ON:-none}"
 RSA_CONFIG="${RSA_CONFIG:-.rust-symbol-audit.toml}"
 REVIEWS="${REVIEWS:-.rust-symbol-audit/reviews.toml}"
 mkdir -p "$WORK"
+# Every probe build in this audit shares one target dir (see build_crate.sh);
+# keeping it under WORK means it is scoped to the run and cleaned up with it.
+export RSA_TARGET_DIR="${RSA_TARGET_DIR:-$WORK/cargo-target}"
 SECTIONS="$WORK/sections.md"; : > "$SECTIONS"
 : > "$WORK/flagged.list"; : > "$WORK/clean.list"
 : > "$WORK/evidence.jsonl" 2>/dev/null || true

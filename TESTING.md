@@ -24,12 +24,12 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 65 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 67 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |
 |---|---|---|
-| A | Build old+new fixture, diff symbols, a bump gaining `std::net::TcpStream` + `Command` tiers **critical** | #3 |
+| A | Build old+new fixture, diff symbols, a bump gaining `std::net::TcpStream` + `Command` tiers **critical**; the two versions stay apart in the shared target dir | #3, #6 |
 | B | `parse_lockdiff.sh` emits the bump row on a real git repo; a no-change diff → `changed=false`, empty TSV | #1, #4 |
 | C | Full pipeline `parse → run_audit → post_comment` (dry-run) produces a Markdown comment with a symbol table naming the crate | #1, #2 |
 | D | `build_crate.sh` fetches & builds **real crates.io versions** (`once_cell` 1.19.0 → 1.20.2) and the whole single-crate bump runs in **~2 s** | #5 |

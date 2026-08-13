@@ -4,6 +4,29 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Probe builds share one cargo target dir** (#6). Every crate version was built
+  in its own throwaway probe with its own `target/`, so a multi-crate PR
+  recompiled the common dependency layer once per probe, and twice over for the
+  two sides of every bump. They now share a target dir for the run, set by
+  `run_audit.sh` and overridable with `RSA_TARGET_DIR` if you want to keep the
+  compiled dependencies between runs.
+
+  Measured on a 5-crate bump PR (`serde_json`, `regex`, `thiserror`, `bytes`,
+  `tracing`), 10 probe builds with a warm registry: 70s down to 47s at the
+  median of 5 alternating runs, with 32 of 77 compilation units served from the
+  shared dir instead of rebuilt. Symbol output is byte-identical.
+
+  Sharing a dir means `lib<crate>-<hash>.rlib` no longer identifies a version,
+  since both sides of a bump now sit in the same `deps/`, so `build_crate.sh`
+  reads the rlib path out of cargo's own JSON build log (`pick_rlib.py`) instead
+  of globbing for it. Picking wrong would have audited one version against
+  itself and reported no change, quietly, so the local suite now asserts the two
+  versions resolve apart.
+
 ## [3.1.1] — 2026-08-10
 
 ### Changed

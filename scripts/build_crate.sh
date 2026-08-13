@@ -11,6 +11,10 @@
 # Usage: build_crate.sh <version> <crate_name> <out_dir>
 #   Prints the .rlib path on stdout. Exits non-zero (and prints nothing on
 #   stdout) if the crate could not be built.
+#
+# Env: RSA_TARGET_DIR — the cargo target dir every probe shares. run_audit.sh
+#      points it inside WORK; point it somewhere persistent to keep the
+#      compiled dependencies between runs.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
@@ -29,6 +33,12 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C symbol-mangling-version=v0"
 export CARGO_TERM_COLOR=never
 # Keep each probe hermetic and off the caller's target dir.
 export CARGO_NET_RETRY="${CARGO_NET_RETRY:-3}"
+# ...but not off each other's. Probes share a dependency graph heavily -- the two
+# sides of one bump almost entirely, and separate crates through the common
+# libc/syn/serde layer -- so one target dir compiles that layer once per audit
+# instead of once per probe. RUSTFLAGS is identical across probes, which is what
+# makes the artifacts reusable rather than silently rebuilt.
+export CARGO_TARGET_DIR="${RSA_TARGET_DIR:-${TMPDIR:-/tmp}/rsa-cargo-target}"
 
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
@@ -57,28 +67,26 @@ else
   printf '%s = "=%s"\n' "$CRATE" "$VERSION" >> Cargo.toml
 fi
 
-if ! cargo build --release --quiet 2> build.err; then
+if ! cargo build --release --quiet --message-format=json-render-diagnostics \
+       > build.json 2> build.err; then
   log "build_crate: '$CRATE@$VERSION' failed to build:"
   sed 's/^/    /' build.err >&2 || true
   exit 3
 fi
 
-# The dependency's rlib lives in target/release/deps/lib<crate>-<hash>.rlib,
-# with dashes in the crate name turned into underscores. (The top-level
-# libprobe_lib.rlib is nearly empty and must NOT be selected.)
-LIBNAME="lib$(printf '%s' "$CRATE" | tr '-' '_')"
-RLIB="$(find target/release/deps -name "${LIBNAME}-*.rlib" 2>/dev/null | head -1)"
-
-if [ -z "$RLIB" ]; then
-  # Fallback: newest dep rlib that isn't the probe crate itself. Covers crates
-  # whose [lib] name differs from the package name.
-  RLIB="$(find target/release/deps -name '*.rlib' ! -name 'libprobe_lib-*.rlib' \
-            -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR==1{print $2}')"
-fi
+# Which of the rlibs in the shared deps dir is this version's is cargo's to say,
+# not something a filename or an mtime can settle. See pick_rlib.py.
+RLIB="$(python3 "$HERE/pick_rlib.py" build.json "$CRATE" "$VERSION" 2>/dev/null || true)"
 
 if [ -z "$RLIB" ]; then
   log "build_crate: no .rlib produced for '$CRATE@$VERSION' (proc-macro / bin-only crate?)"
   exit 4
 fi
 
-printf '%s\n' "$OUTDIR/$RLIB"
+# Cargo prints native paths; on Windows those are "D:/...", which the rest of
+# the pipeline cannot stat.
+if command -v cygpath >/dev/null 2>&1; then
+  RLIB="$(cygpath -u "$RLIB")"
+fi
+
+printf '%s\n' "$RLIB"
