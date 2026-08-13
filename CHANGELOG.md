@@ -4,7 +4,12 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.2.0] — 2026-08-13
+
+Faster, and it no longer clears a bump it never actually looked at. ⚠️ The fix
+changes verdicts: a crate whose old version carries no v0 symbols used to come
+back `none` and can now come back `critical`, so a repo running `fail-on` may
+newly fail. That is the point of it.
 
 ### Fixed
 
@@ -200,6 +205,8 @@ capabilities as a PR comment.
 - **Consumer example** (`examples/pr-audit.yml`) and docs (`README.md`,
   `TESTING.md`).
 
+[3.2.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.2.0
+[3.1.1]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.1.1
 [3.1.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.1.0
 [3.0.2]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.2
 [3.0.1]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.0.1
