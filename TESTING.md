@@ -24,7 +24,7 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 67 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 71 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |
@@ -47,6 +47,7 @@ Expected result: **`RESULT: 67 passed, 0 failed` / `ALL GREEN`**.
 | P | `audit-report.json` evidence file is well-formed with the verdict + per-crate findings | new |
 | Q | The comment shows the **actual build.rs code** (not just "it changed") in a `<details>` block | new |
 | R | `read_reviews.py` normalizes whole-version (`ALL`) vs per-capability (`ACCEPT`) sign-offs | new |
+| Y | A crate whose old version carries **zero v0 symbols** (`facade` 0.1.0, the `thiserror` shape) still gets diffed, so a bump that gains `TcpStream` + `Command` tiers **critical** instead of coming back clean | #14 |
 
 `test/fixtures/netcap-0.1.0` (pure compute) vs `netcap-0.2.0` (adds
 `TcpStream::connect` + `Command::spawn`) is the "real version bump that gains

@@ -489,6 +489,33 @@ have "$XWORK/out.txt" 'tier=none' && ok "cargo-vet sign-off suppresses capabilit
 echo
 
 # ===========================================================================
+# ===========================================================================
+echo "### TEST Y — a crate with no v0 symbols still gets diffed (issue #14)"
+# facade 0.1.0 is consts/type-alias/macro only, so its rlib carries no v0
+# symbols at all -- the shape of thiserror and friends. extract_symbols' grep
+# used to exit 1 on that and take diff_symbols.sh's `set -e` with it, leaving
+# added_syms.txt unwritten and the bump reported as clean.
+export RSA_FIXTURES="$FIX"
+YWORK="$WORK/y"; mkdir -p "$YWORK"
+Y_OLD="$("$SCRIPTS/build_crate.sh" 0.1.0 facade "$YWORK/old" 2>"$YWORK/old.log")"
+Y_NEW="$("$SCRIPTS/build_crate.sh" 0.2.0 facade "$YWORK/new" 2>"$YWORK/new.log")"
+Y_OLDSYMS="$("${NM:-nm}" "$Y_OLD" 2>/dev/null | awk '{print $NF}' | grep -c '^_R')"
+[ "$Y_OLDSYMS" = "0" ] && ok "facade 0.1.0 really carries zero v0 symbols" \
+                       || bad "fixture drifted: old side has $Y_OLDSYMS v0 symbols, test proves nothing"
+"$SCRIPTS/diff_symbols.sh" "$Y_OLD" "$Y_NEW" "$YWORK" >/dev/null 2>"$YWORK/diff.log"
+[ -f "$YWORK/added_syms.txt" ] && ok "symbol diff still ran against the empty old side" \
+                              || bad "symbol lane died on the empty old side (see $YWORK/diff.log)"
+have "$YWORK/added_syms.txt" 'TcpStream' && ok "the capability the empty old side hid is flagged" \
+                                         || bad "TcpStream missing from added symbols"
+printf 'facade\t0.1.0\t0.2.0\n' > "$YWORK/lockdiff.tsv"
+LOCKDIFF_TSV="$YWORK/lockdiff.tsv" WORK="$YWORK/run" REVIEWS="/nonexistent" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$YWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$YWORK/run.log"
+have "$YWORK/out.txt" 'tier=critical' && ok "no-symbol -> capability bump tiers CRITICAL end to end" \
+  || bad "expected tier=critical ($(grep '^tier=' "$YWORK/out.txt" 2>/dev/null))"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

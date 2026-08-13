@@ -6,6 +6,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A crate whose old version has no v0 symbols is no longer reported as clean**
+  (#14). `extract_symbols` ended in a `grep '^_R'` that exits 1 when an rlib
+  carries no v0 symbols, and `diff_symbols.sh` runs under `set -euo pipefail`,
+  so the whole symbol lane died right after writing `old_syms.txt`.
+  `added_syms.txt` was never written, `run_audit.sh` swallowed the failure, and
+  the crate came back with no added symbols and tier `none`.
+
+  Rlibs with no v0 symbols are ordinary: facade crates that are all consts, type
+  aliases and macros have none, `thiserror` 1.0.61 among them. The bad case is
+  such a version bumping to one that adds real code, where the audit skipped the
+  diff entirely and cleared it. On the new `facade` fixture, a bump that gains
+  `TcpStream::connect` and `Command::spawn` went from `tier=none` to
+  `tier=critical`.
+
 ### Changed
 
 - **Probe builds share one cargo target dir** (#6). Every crate version was built

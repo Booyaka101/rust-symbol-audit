@@ -66,9 +66,13 @@ extract_symbols() {
   if [ -z "$rlib" ] || [ ! -f "$rlib" ]; then
     return 0
   fi
+  # An rlib with no v0 symbols is an ordinary crate, not an error: facade crates
+  # that are all consts, type aliases and macros (thiserror 1.0.61 is one) carry
+  # none. Callers run under `set -euo pipefail`, so grep's empty-match exit 1
+  # would take them down mid-diff and leave the whole symbol lane silently unrun.
   "$NM" "$rlib" 2>/dev/null \
     | awk '{ print $NF }' \
-    | grep '^_R' \
+    | { grep '^_R' || true; } \
     | "$RUSTFILT" \
     | sort -u
 }
