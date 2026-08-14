@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest something rust-symbol-audit should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Runs inside your workflow against your dependency tree and writes a sticky pull-request comment. It publishes nothing.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation, not the solution. What got in your way?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What are you doing instead today?
+    validations:
+      required: false

@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: RustSec advisory database
+    url: https://rustsec.org/
+    about: Known advisories. A missing advisory is upstream data, not a bug here.
+  - name: cargo-semver-checks
+    url: https://github.com/obi1kenobi/cargo-semver-checks
+    about: The upstream semver analysis. Disagreements about a symbol's compatibility usually start there.
+  - name: Security issue
+    url: https://github.com/Booyaka101/rust-symbol-audit/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.

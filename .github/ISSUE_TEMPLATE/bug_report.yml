@@ -1,0 +1,45 @@
+name: Bug report
+description: Something didn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, and what came back.
+      placeholder: |
+        - uses: Booyaka101/rust-symbol-audit@v1
+          with:
+            ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Which ref you pinned
+      description: The `@v1` / `@sha` you have in `uses:`.
+    validations:
+      required: true
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Runner
+      description: The `runs-on:` value, and a link to the failing run if the repo is public.
+      placeholder: ubuntu-24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: crate
+    attributes:
+      label: Which crate and which of the five checks
+      description: The dependency whose bump triggered it, and which check produced the wrong result.
