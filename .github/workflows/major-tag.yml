@@ -1,0 +1,42 @@
+name: Major tag
+
+# Consumers pin @v1. Nothing moved it when a release shipped, so @v1 served a
+# commit two days older than the latest release until someone noticed by hand.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag the major tag should point at
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Move the major tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::$TAG is not vMAJOR.MINOR.PATCH"; exit 1 ;;
+          esac
+          # A pre-release must never move a tag that consumers pin.
+          if [ "${TAG#*-}" != "$TAG" ]; then
+            echo "::notice::$TAG is a pre-release, leaving the major tag alone"
+            exit 0
+          fi
+          MAJOR="${TAG%%.*}"
+          git tag -f "$MAJOR" "$TAG^{commit}"
+          git push --force origin "refs/tags/$MAJOR"
+          echo "\`$MAJOR\` now points at \`$TAG\` ($(git rev-parse --short "$TAG^{commit}"))" >> "$GITHUB_STEP_SUMMARY"
