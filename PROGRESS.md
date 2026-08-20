@@ -52,7 +52,12 @@ suppressed by a ledger sign-off** (tested, same property as advisories).
 - `test/fixtures/cratesio/` — netcap.json (+`created_at`),
   netcap-fresh.json.template, netcap-old.json, netcap-ghost.json.
 - `test/run_local.sh` — tests Z/AA/AB/AC.
-- README (lane #4, inputs table, prior-art section, catches list), CHANGELOG.
+- `images/pr-comment.png` + `.gitattributes` (`*.png binary`) — README
+  screenshot of a real live-crates.io run, rendered through GitHub's markdown
+  API. Verified byte-identical after push and confirmed loading on the GitHub
+  README page.
+- README (lane #4, inputs table, prior-art section, catches list, screenshot),
+  CHANGELOG.
 
 ## Next steps (owner)
 
