@@ -6,5 +6,8 @@
 *.yml   text eol=lf
 *.yaml  text eol=lf
 
+# Screenshots must never go through newline normalization.
+*.png   binary
+
 # Default: let Git normalize text files, detect binaries automatically.
 * text=auto

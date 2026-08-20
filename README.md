@@ -8,6 +8,15 @@
 A GitHub Action that turns a Rust dependency bump into a **capability-creep
 review you can actually gate on**.
 
+![The sticky PR comment rust-symbol-audit posts on a Cargo.lock bump. Headline verdict HIGH, three crates audited and two flagged, recommendation review. arrayref 0.3.9 to 0.3.10 is flagged because crates.io no longer lists the version; cap-std 3.4.5 to 3.4.6 is flagged because it was published four minutes earlier; once_cell is folded into a collapsed clean list showing its publish age.](images/pr-comment.png)
+
+<sub>A real run against live crates.io, rendered as GitHub shows it.
+`arrayref 0.3.10` is the version [deleted in the 2026-08-20 supply-chain
+attack](https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/).
+`cap-std 3.4.6` was a perfectly legitimate release that happened to be four
+minutes old when this ran, so the finding says *young*, not *malicious*. That
+distinction is the point: it tells you what it actually knows.</sub>
+
 > **See it in action →** a live demo PR where it catches a real advisory and folds
 > away the clean bump: **[rust-symbol-audit-demo #1](https://github.com/Booyaka101/rust-symbol-audit-demo/pull/1)**. On PRs that change `Cargo.lock`, for every
 crate whose version changed it runs five checks, merges them into one **sticky PR
