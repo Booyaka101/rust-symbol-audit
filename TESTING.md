@@ -24,7 +24,7 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 71 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 95 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |

@@ -4,7 +4,7 @@
     "repository": "https://github.com/example/netcap"
   },
   "versions": [
-    { "num": "0.2.0", "created_at": "2024-06-01T10:00:00.000000Z", "yanked": false, "published_by": { "login": "attacker-acct" } },
+    { "num": "0.2.0", "created_at": "__CREATED_AT__", "yanked": false, "published_by": { "login": "original-author" } },
     { "num": "0.1.0", "created_at": "2024-01-15T09:00:00.000000Z", "yanked": false, "published_by": { "login": "original-author" } }
   ]
 }

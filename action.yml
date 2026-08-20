@@ -37,6 +37,10 @@ inputs:
     description: "Query OSV.dev (RustSec) for known advisories against the new version (needs network). Set to 'false' to disable."
     required: false
     default: "true"
+  min-publish-age-hours:
+    description: "Tier a bumped version published less than this many hours ago as high (fresh-version). '0' keeps the publish-age note in the comment but never tiers it."
+    required: false
+    default: "24"
   comment:
     description: "Post the report as a PR comment. Set to 'false' for summary-only mode (still writes the job summary, sets outputs, and can fail the check)."
     required: false
@@ -125,6 +129,7 @@ runs:
         VET_AUDITS: ${{ inputs.vet }}
         RSA_CHECK_PROVENANCE: ${{ inputs.check-provenance == 'false' && '0' || '1' }}
         RSA_CHECK_ADVISORIES: ${{ inputs.check-advisories == 'false' && '0' || '1' }}
+        RSA_MIN_PUBLISH_AGE_HOURS: ${{ inputs.min-publish-age-hours }}
         RSA_COMMENT: ${{ inputs.comment }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
