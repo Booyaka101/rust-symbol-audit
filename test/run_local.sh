@@ -516,6 +516,107 @@ have "$YWORK/out.txt" 'tier=critical' && ok "no-symbol -> capability bump tiers 
 echo
 
 # ===========================================================================
+echo "### TEST Z — provenance: fresh-version window (a version published minutes ago)"
+# The fresh fixture's created_at is computed at test time (now minus 41 min in
+# UTC) so the age assertions hold no matter when the suite runs; the static
+# years-old fixture (TEST AA) only ever gets older. That keeps both age tests
+# deterministic without the suite failing as it ages.
+export RSA_FIXTURES="$FIX"
+ZWORK="$WORK/z"; mkdir -p "$ZWORK/cratesio"
+python3 - "$FIX/cratesio/netcap-fresh.json.template" "$ZWORK/cratesio/netcap.json" <<'PY'
+import sys
+from datetime import datetime, timedelta, timezone
+ts = (datetime.now(timezone.utc) - timedelta(minutes=41)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+open(sys.argv[2], "w").write(open(sys.argv[1]).read().replace("__CREATED_AT__", ts))
+PY
+RSA_CRATESIO_FIXTURE="$ZWORK/cratesio" "$SCRIPTS/provenance.sh" netcap 0.1.0 0.2.0 "$ZWORK" >/dev/null 2>"$ZWORK/z.log"
+echo "  --- provenance_findings.tsv ---"; sed 's/^/    /' "$ZWORK/provenance_findings.tsv" 2>/dev/null
+awk -F'\t' '$1=="high"&&$2=="fresh-version"{f=1} END{exit !f}' "$ZWORK/provenance_findings.tsv" \
+  && ok "version published 41 min ago -> high fresh-version" || bad "no high fresh-version finding"
+have "$ZWORK/provenance_findings.tsv" 'published 41 minutes ago' && ok "detail names the real age" || bad "age missing from detail"
+have "$ZWORK/provenance_findings.tsv" '86-107 minutes' && ok "detail cites the arrayref incident removal window" || bad "incident context missing"
+# full pipeline: a ledger sign-off must NOT suppress it (same property as test L)
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$ZWORK/run" REVIEWS="$KWORK/reviews.toml" \
+  RSA_CRATESIO_FIXTURE="$ZWORK/cratesio" RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$ZWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$ZWORK/run.log"
+have "$ZWORK/out.txt" 'tier=high' && ok "fresh-version survives the sign-off (tier high, not none)" \
+  || bad "expected tier=high ($(grep '^tier=' "$ZWORK/out.txt" 2>/dev/null))"
+have "$ZWORK/out.txt" 'recommendation=review' && ok "fresh version flips recommendation to review" \
+  || bad "expected recommendation=review"
+have "$ZWORK/run/comment_body.md" '(published 41 minutes ago)' && ok "comment shows the age inline next to the versions" \
+  || bad "inline age missing from comment"
+have "$ZWORK/run/comment_body.md" 'fresh-version review window' && ok "headline names the fresh publish as the reason" \
+  || bad "headline missing fresh-version reason"
+# min-publish-age-hours=0: note only, prior tiering restored
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$ZWORK/run0" REVIEWS="$KWORK/reviews.toml" RSA_MIN_PUBLISH_AGE_HOURS=0 \
+  RSA_CRATESIO_FIXTURE="$ZWORK/cratesio" RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$ZWORK/out0.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$ZWORK/run0.log"
+have "$ZWORK/out0.txt" 'tier=none' && ok "min-publish-age-hours=0 restores the old tier (none)" \
+  || bad "expected tier=none with window 0 ($(grep '^tier=' "$ZWORK/out0.txt" 2>/dev/null))"
+have "$ZWORK/out0.txt" 'recommendation=auto-merge' && ok "window 0 -> recommendation back to auto-merge" \
+  || bad "expected recommendation=auto-merge with window 0"
+have "$ZWORK/run0/comment_body.md" '(published 41 minutes ago)' && ok "age note still shown with the window disabled" \
+  || bad "inline age missing with window 0"
+echo
+
+# ===========================================================================
+echo "### TEST AA — provenance: a years-old version gets a none-tier age note only"
+AAWORK="$WORK/aa"; mkdir -p "$AAWORK/cratesio"
+cp "$FIX/cratesio/netcap-old.json" "$AAWORK/cratesio/netcap.json"
+RSA_CRATESIO_FIXTURE="$AAWORK/cratesio" "$SCRIPTS/provenance.sh" netcap 0.1.0 0.2.0 "$AAWORK" >/dev/null 2>"$AAWORK/aa.log"
+echo "  --- provenance_findings.tsv ---"; sed 's/^/    /' "$AAWORK/provenance_findings.tsv" 2>/dev/null
+awk -F'\t' '$1=="none"&&$2=="fresh-version"{f=1} END{exit !f}' "$AAWORK/provenance_findings.tsv" \
+  && ok "old version -> none-tier fresh-version note carrying the age" || bad "age note missing"
+have "$AAWORK/provenance_findings.tsv" 'days ago|years ago' && ok "note carries a real age" || bad "no age in note"
+[ "$(awk 'END{print NR+0}' "$AAWORK/provenance_findings.tsv")" = "1" ] \
+  && ok "and nothing else (single note, no findings)" || bad "unexpected extra findings"
+python3 -c "import json,sys; assert json.load(open(sys.argv[1]))['tier']=='none'" "$AAWORK/provenance.json" 2>/dev/null \
+  && ok "provenance.json tier none for the old version" || bad "provenance.json tier not none"
+echo
+
+# ===========================================================================
+echo "### TEST AB — provenance: version missing from crates.io = removed from registry"
+# arrayref 0.3.10 shape: the malicious version was DELETED from crates.io, not
+# yanked, so it is simply absent from the versions array and the old code
+# skipped every check (nv=None) and emitted zero findings.
+ABWORK="$WORK/ab"; mkdir -p "$ABWORK/cratesio"
+cp "$FIX/cratesio/netcap-ghost.json" "$ABWORK/cratesio/netcap.json"
+RSA_CRATESIO_FIXTURE="$ABWORK/cratesio" "$SCRIPTS/provenance.sh" netcap 0.1.0 0.2.0 "$ABWORK" >/dev/null 2>"$ABWORK/ab.log"
+echo "  --- provenance_findings.tsv ---"; sed 's/^/    /' "$ABWORK/provenance_findings.tsv" 2>/dev/null
+awk -F'\t' '$1=="high"&&$2=="version-not-on-registry"{f=1} END{exit !f}' "$ABWORK/provenance_findings.tsv" \
+  && ok "missing version -> high version-not-on-registry" || bad "version-not-on-registry not emitted"
+have "$ABWORK/provenance_findings.tsv" 'removed from the registry' && ok "detail explains the removal" || bad "removal detail missing"
+# a newly-added crate (empty old version) gets the same check
+RSA_CRATESIO_FIXTURE="$ABWORK/cratesio" "$SCRIPTS/provenance.sh" netcap "" 0.2.0 "$ABWORK/new" >/dev/null 2>>"$ABWORK/ab.log"
+awk -F'\t' '$1=="high"&&$2=="version-not-on-registry"{f=1} END{exit !f}' "$ABWORK/new/provenance_findings.tsv" \
+  && ok "newly-added crate gets the registry check too" || bad "newly-added crate skipped the check"
+# full pipeline: sign-off does not suppress it, recommendation flips
+LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$ABWORK/run" REVIEWS="$KWORK/reviews.toml" \
+  RSA_CRATESIO_FIXTURE="$ABWORK/cratesio" RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$ABWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$ABWORK/run.log"
+have "$ABWORK/out.txt" 'tier=high' && ok "version-not-on-registry survives the sign-off" \
+  || bad "expected tier=high ($(grep '^tier=' "$ABWORK/out.txt" 2>/dev/null))"
+have "$ABWORK/out.txt" 'recommendation=review' && ok "removed version flips recommendation to review" \
+  || bad "expected recommendation=review"
+have "$ABWORK/run/comment_body.md" 'no longer lists' && ok "headline names the registry removal as the reason" \
+  || bad "headline missing registry-removal reason"
+echo
+
+# ===========================================================================
+echo "### TEST AC — offline/disabled provenance path byte-identical to before"
+ACWORK="$WORK/ac"; mkdir -p "$ACWORK"
+RSA_CHECK_PROVENANCE=0 "$SCRIPTS/provenance.sh" netcap 0.1.0 0.2.0 "$ACWORK" >/dev/null 2>"$ACWORK/ac.log"
+printf 'none\tprovenance-unknown\tcrates.io metadata unavailable (offline or disabled) — provenance not checked\n' > "$ACWORK/expected.tsv"
+cmp -s "$ACWORK/expected.tsv" "$ACWORK/provenance_findings.tsv" \
+  && ok "offline path emits exactly the provenance-unknown note (byte-identical)" \
+  || bad "offline TSV drifted: $(cat "$ACWORK/provenance_findings.tsv" 2>/dev/null)"
+printf '{"tier":"none","findings":[{"tier":"none","kind":"provenance-unknown","detail":"crates.io metadata unavailable"}]}\n' > "$ACWORK/expected.json"
+cmp -s "$ACWORK/expected.json" "$ACWORK/provenance.json" \
+  && ok "offline provenance.json byte-identical" || bad "offline JSON drifted"
+[ ! -f "$ACWORK/publish_age.txt" ] && ok "no publish age manufactured offline" || bad "publish_age.txt written offline"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

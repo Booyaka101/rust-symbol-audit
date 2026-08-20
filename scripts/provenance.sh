@@ -3,7 +3,12 @@
 #
 # The highest-signal supply-chain tells are not "new capability" but "who/where
 # did this come from": a version published by a DIFFERENT account than before, a
-# crate with NO declared source repository, or a version that has been YANKED.
+# crate with NO declared source repository, a version that has been YANKED, a
+# version crates.io no longer LISTS at all (how the registry responds to a
+# malicious publish — arrayref 0.3.10 was deleted, not yanked, 2026-08-20), or a
+# version published so RECENTLY it predates the window in which compromised
+# releases get caught (the arrayref/internment/append-only-vec malicious
+# versions were live 86-107 minutes).
 # (event-stream / ua-parser-js / xz all looked like a provenance change first.)
 #
 # Queries the crates.io API for the crate's version metadata. NEEDS NETWORK at
@@ -14,10 +19,17 @@
 # Usage: provenance.sh <crate> <old_ver> <new_ver> <out_dir>
 #   Writes <out_dir>/provenance_findings.tsv (<tier>\t<kind>\t<detail>)
 #          <out_dir>/provenance.json
+#          <out_dir>/publish_age.txt (human age of the new version, when known)
+# Env: RSA_MIN_PUBLISH_AGE_HOURS — fresh-version window, default 24; 0 keeps the
+#      publish-age note but never tiers it.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
 . "$HERE/lib.sh"
+
+# Finding details are UTF-8; Windows python otherwise decodes/encodes cp1252
+# and dies on them (Linux runners are unaffected).
+export PYTHONUTF8=1
 
 CRATE="${1:?crate required}"
 OLDV="${2:-}"
@@ -28,6 +40,7 @@ TSV="$OUTDIR/provenance_findings.tsv"
 JSON="$OUTDIR/provenance.json"
 RAW="$OUTDIR/cratesio.json"
 : > "$TSV"
+rm -f "$OUTDIR/publish_age.txt"
 
 # --- obtain crates.io metadata (mock, else network) ---
 got=0
@@ -48,10 +61,16 @@ if [ "$got" -ne 1 ]; then
   cat "$JSON"; exit 0
 fi
 
-OLDV="$OLDV" NEWV="$NEWV" python3 - "$RAW" >> "$TSV" <<'PY'
+OLDV="$OLDV" NEWV="$NEWV" OUTDIR="$OUTDIR" python3 - "$RAW" >> "$TSV" <<'PY'
 import json, os, sys
+from datetime import datetime, timezone
 oldv = os.environ.get("OLDV", "")
 newv = os.environ.get("NEWV", "")
+outdir = os.environ.get("OUTDIR", ".")
+try:
+    min_age_h = float(os.environ.get("RSA_MIN_PUBLISH_AGE_HOURS", "24"))
+except ValueError:
+    min_age_h = 24.0
 try:
     data = json.load(open(sys.argv[1], encoding="utf-8"))
 except Exception:
@@ -67,6 +86,18 @@ def pub(v):
     pb = (v or {}).get("published_by") or {}
     return pb.get("login") or pb.get("name")
 
+def rel_age(secs):
+    m = int(secs // 60)
+    if m < 120:
+        return "%d minute%s ago" % (m, "" if m == 1 else "s")
+    h = int(secs // 3600)
+    if h < 48:
+        return "%d hours ago" % h
+    d = int(secs // 86400)
+    if d < 730:
+        return "%d days ago" % d
+    return "%d years ago" % (d // 365)
+
 nv = by_num.get(str(newv))
 ov = by_num.get(str(oldv)) if oldv else None
 
@@ -77,11 +108,49 @@ if not repo:
     out.append(("high", "no-source-repo",
                 "crate declares NO source repository on crates.io — the published code cannot be traced to a git source"))
 
-# 2) new version yanked
+# 2) the audited version is not in the registry's versions array at all. This is
+# how crates.io responds to a malicious publish (deleted, not yanked — so the
+# yanked check below never sees it), and it must run before the age check since
+# a removed version has no created_at to read. The metadata-fetch-failed case
+# never reaches here (the offline path above exits early).
+if nv is None:
+    out.append(("high", "version-not-on-registry",
+                "crates.io does not list version %s — it was removed from the registry, which is how crates.io responds to a malicious publish (Rust Security Response Team, 2026-08-20)" % newv))
+
+# 3) new version yanked
 if nv and nv.get("yanked"):
     out.append(("high", "yanked", "the new version is YANKED on crates.io (pulled by the author/registry)"))
 
-# 3) publisher changed between old and new
+# 4) publish age. Inside the window -> high; outside -> a none-tier note so the
+# comment always carries the age. Window 0 disables the tiering, note only.
+# UTC only: crates.io returns Z-suffixed ISO-8601; never the runner's zone.
+if nv is not None:
+    created = nv.get("created_at")
+    secs = None
+    try:
+        ts = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        secs = (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds()
+    except (TypeError, ValueError):
+        pass
+    if secs is None:
+        # absent/malformed date is a note, never a finding — no verdict from missing data
+        out.append(("none", "publish-age-unknown",
+                    "crates.io metadata carries no usable publish date for %s — publish age not assessed" % newv))
+    else:
+        age = rel_age(max(secs, 0))
+        with open(os.path.join(outdir, "publish_age.txt"), "w", encoding="utf-8") as fh:
+            fh.write(age)
+        if min_age_h > 0 and secs < min_age_h * 3600:
+            out.append(("high", "fresh-version",
+                        "published %s; the arrayref/internment/append-only-vec malicious versions of 2026-08-20 were removed within 86-107 minutes, so a version this young has not yet been through the window in which compromised releases get caught" % age))
+        elif min_age_h > 0:
+            out.append(("none", "fresh-version",
+                        "published %s (older than the %g h fresh-version window)" % (age, min_age_h)))
+        else:
+            out.append(("none", "fresh-version",
+                        "published %s (fresh-version window disabled)" % age))
+
+# 5) publisher changed between old and new
 np, opb = pub(nv), pub(ov)
 if np and opb and np != opb:
     out.append(("high", "publisher-change",

@@ -12,7 +12,8 @@
 # lanes; advisories/provenance are never hidden by a stale sign-off.
 #
 # Env: LOCKDIFF_TSV WORK MAX_CRATES FAIL_ON RSA_CONFIG REVIEWS PR_NUMBER PR_AUTHOR
-#      RSA_CHECK_PROVENANCE RSA_CHECK_ADVISORIES GH_TOKEN RSA_DRY_RUN RSA_TARGET_DIR
+#      RSA_CHECK_PROVENANCE RSA_CHECK_ADVISORIES RSA_MIN_PUBLISH_AGE_HOURS
+#      GH_TOKEN RSA_DRY_RUN RSA_TARGET_DIR
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
@@ -24,6 +25,7 @@ MAX_CRATES="${MAX_CRATES:-10}"
 FAIL_ON="${FAIL_ON:-none}"
 RSA_CONFIG="${RSA_CONFIG:-.rust-symbol-audit.toml}"
 REVIEWS="${REVIEWS:-.rust-symbol-audit/reviews.toml}"
+export RSA_MIN_PUBLISH_AGE_HOURS="${RSA_MIN_PUBLISH_AGE_HOURS:-24}"
 mkdir -p "$WORK"
 # Every probe build in this audit shares one target dir (see build_crate.sh);
 # keeping it under WORK means it is scoped to the run and cleaned up with it.
@@ -86,12 +88,17 @@ crate_headline() {
     id="$(grep -oE 'RUSTSEC-[0-9]+-[0-9]+|GHSA-[a-z0-9-]+|CVE-[0-9]+-[0-9]+' "$ADV_TSV_F" | head -1)"
     printf 'has a known security advisory%s' "${id:+ ($id)}"; return
   fi
+  if awk -F'\t' '$2=="version-not-on-registry"{f=1} END{exit !f}' "$PROV_TSV_F" 2>/dev/null; then
+    printf 'bumps to a version crates.io no longer lists (removed from the registry)'; return; fi
   if awk -F'\t' '$2=="publisher-change"{f=1} END{exit !f}' "$PROV_TSV_F" 2>/dev/null; then
     printf 'is now published by a different account'; return; fi
   if awk -F'\t' '$2=="yanked"{f=1} END{exit !f}' "$PROV_TSV_F" 2>/dev/null; then
     printf 'has a yanked new version'; return; fi
   if awk -F'\t' '$2=="no-source-repo"{f=1} END{exit !f}' "$PROV_TSV_F" 2>/dev/null; then
     printf 'has no source repository on crates.io'; return; fi
+  if awk -F'\t' '$1=="high"&&$2=="fresh-version"{f=1} END{exit !f}' "$PROV_TSV_F" 2>/dev/null; then
+    printf 'was published %s, inside the fresh-version review window' \
+      "$(cat "$CDIR/publish_age.txt" 2>/dev/null || printf 'very recently')"; return; fi
   if awk -F'\t' '$2=="build-script"{f=1} END{exit !f}' "$SRC_TSV_F" 2>/dev/null; then
     printf 'added or changed a build script that runs at compile time'; return; fi
   if awk -F'\t' '$2=="proc-macro"{f=1} END{exit !f}' "$SRC_TSV_F" 2>/dev/null; then
@@ -212,6 +219,8 @@ while IFS= read -r _line || [ -n "$_line" ]; do
     apply_allow "$name" "$CDIR/provenance_findings.tsv" > "$CDIR/provenance.filtered" 2>/dev/null || true
     PROV_TSV_F="$CDIR/provenance.filtered"; PROV_TIER="$(max_tier "$PROV_TSV_F")"
   fi
+  PUB_AGE=""
+  [ -s "$CDIR/publish_age.txt" ] && PUB_AGE="$(cat "$CDIR/publish_age.txt")"
   ADV_TSV_F="$CDIR/advisory_findings.tsv"; : > "$ADV_TSV_F"; ADV_TIER="none"
   if [ "${RSA_CHECK_ADVISORIES:-1}" != "0" ] && { [ "$is_fixture" -eq 0 ] || [ -n "${RSA_ADVISORY_FIXTURE:-}" ]; }; then
     "$HERE/advisories.sh" "$name" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
@@ -236,6 +245,7 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   tierlabel="$(printf '%s' "$CTIER" | tr '[:lower:]' '[:upper:]')"
   [ "$CTIER" = "none" ] && tierlabel="no flagged changes"
   if [ -z "${oldv:-}" ]; then verstr="new → \`$newv\`"; else verstr="\`$oldv\` → \`$newv\`"; fi
+  [ -n "$PUB_AGE" ] && verstr="$verstr (published $PUB_AGE)"
 
   printf '%s\t%s\t%s\t%s\t%s\n' "$name" "${oldv:-}" "$newv" "$CTIER" "$FULLY_REVIEWED" > "$CDIR/meta.tsv"
 
@@ -245,7 +255,7 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   [ -n "$NEW_ERR" ] && show_full=1
 
   if [ "$show_full" -eq 0 ]; then
-    printf '%s\t%s\t%s\t%s\n' "$name" "${oldv:-—}" "$newv" "$FULLY_REVIEWED" >> "$WORK/clean.list"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "${oldv:-—}" "$newv" "$FULLY_REVIEWED" "$PUB_AGE" >> "$WORK/clean.list"
     continue
   fi
   printf '%s\t%s\t%s\n' "$(tier_rank "$CTIER")" "$name" "$CDIR" >> "$WORK/flagged.list"
@@ -334,8 +344,9 @@ if [ -s "$WORK/clean.list" ]; then
   n="$(count_lines "$WORK/clean.list")"
   {
     printf '<details><summary>🟢 %s dependency change(s) with no flagged findings</summary>\n\n' "$n"
-    while IFS=$'\t' read -r nm ov nv rv; do
+    while IFS=$'\t' read -r nm ov nv rv age; do
       if [ "$ov" = "—" ]; then vs="new → \`$nv\`"; else vs="\`$ov\` → \`$nv\`"; fi
+      [ -n "$age" ] && vs="$vs (published $age)"
       [ "$rv" = "1" ] && note=" — reviewed ✅" || note=""
       printf -- '- [`%s`](https://crates.io/crates/%s) %s%s\n' "$nm" "$nm" "$vs" "$note"
     done < "$WORK/clean.list"

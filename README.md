@@ -30,8 +30,14 @@ publishes it, or ship a known vuln?*
 3. **Dependency tree** — crates the bump **newly pulls into your build**,
    highlighting ones with known network / process / crypto / FFI capability.
 4. **Provenance** *(network)* — via the crates.io API: a version **published by a
-   different account** than before, a crate with **no source repository**, or a
-   **yanked** version. This is what real supply-chain attacks look like first.
+   different account** than before, a crate with **no source repository**, a
+   **yanked** version, a version **crates.io no longer lists** (deleted from the
+   registry — how crates.io responds to a malicious publish), or a version
+   **published within the last 24 hours** (`min-publish-age-hours`) — the
+   arrayref/internment/append-only-vec malicious versions of 2026-08-20 were
+   caught and removed within 86–107 minutes, so a version that young hasn't
+   been through that window yet. This is what real supply-chain attacks look
+   like first. The comment also shows each bump's publish age inline.
 5. **Advisories** *(network)* — via OSV.dev (RustSec): known vulnerabilities
    against the exact new version.
 
@@ -66,6 +72,28 @@ green with no extra work.
 > and is quiet enough to keep on. It does **not** catch capability reached only
 > through generics never instantiated in the crate's own rlib, and a determined
 > attacker can evade static symbol tells. A flag is a prompt to review.
+
+### Publish age: prior art, and what this adds
+
+Cooldown is not a new idea and this tool didn't invent it. Dependabot ships a
+default 3-day cooldown (July 2026), Renovate has `minimumReleaseAge`,
+[cargo-cooldown](https://crates.io/crates/cargo-cooldown) exists, and Cargo's own
+[RFC 3923 min-publish-age](https://rust-lang.github.io/rfcs/3923-cargo-min-publish-age.html)
+is implemented on nightly as `-Zmin-publish-age` (tracking issue
+rust-lang/cargo#17009), not stable. Those all act at *resolution* time, and the
+RFC is explicit that the resolver ignores too-young versions "unless they
+already exist in the `Cargo.lock` file". A version already pinned in the diff
+you're reviewing is exactly that case.
+
+What this adds: rust-symbol-audit is a review gate that reads the lockfile diff
+*after* resolution and emits a merge recommendation, and until 3.3.0 it did so
+with no idea how old the version was. Now every audited bump carries its publish
+age, a version inside the `min-publish-age-hours` window is a `high`-tier
+`fresh-version` finding, and a version crates.io no longer lists at all (the
+registry's response to a malicious publish, as with arrayref 0.3.10) is a
+`high`-tier `version-not-on-registry` finding. Like advisories and the other
+provenance findings, **neither can be suppressed by a review-ledger sign-off**;
+the local suite asserts that property for both.
 
 ## Usage
 
@@ -107,6 +135,7 @@ the `recommendation` output).
 | `vet` | `supply-chain/audits.toml` | A [cargo-vet](https://mozilla.github.io/cargo-vet/) audits file, if present — its certified versions are imported as sign-offs. |
 | `check-provenance` | `true` | Query crates.io for publisher/repo/yank changes (needs network). |
 | `check-advisories` | `true` | Query OSV.dev for RustSec advisories (needs network). |
+| `min-publish-age-hours` | `24` | Tier a bumped version published less than this many hours ago as `high` (`fresh-version`). `0` keeps the publish-age note in the comment but never tiers it. |
 | `comment` | `true` | Post the report as a PR comment. `false` = summary-only mode (still writes the job summary, sets outputs, and can `fail-on`). |
 | `manifest-dir` | `.` | Directory holding the `Cargo.lock` to watch, for monorepos / non-root workspaces (e.g. `backend`). Also point the workflow's `paths:` filter at `<dir>/Cargo.lock`. |
 
@@ -150,7 +179,7 @@ lister (GNU `nm`, or `rustup component add llvm-tools` → `llvm-nm`, auto-detec
 on Windows). In **Git Bash**:
 
 ```bash
-bash test/run_local.sh      # -> RESULT: 65 passed, 0 failed / ALL GREEN
+bash test/run_local.sh      # -> RESULT: 94 passed, 0 failed / ALL GREEN
 ```
 
 Exercises all five lanes, the ledger ratchet, config suppression, gating, the
@@ -163,7 +192,9 @@ mock crates.io / OSV responses (plus one real crates.io bump). See
 **Catches well:** a crate that starts directly calling `std::net`/`process`/`fs`;
 a new or changed **build script** / **proc-macro** (even when the crate won't
 build as a lib); a **native lib** newly linked; **new crates** in the tree; a
-**publisher/repo/yank** change; a **known advisory** on the new version.
+**publisher/repo/yank** change; a version **younger than the review window** or
+**deleted from crates.io** (the arrayref-incident shapes); a **known advisory**
+on the new version.
 
 **Misses / limits (inherent to static analysis):** capability via generics never
 instantiated in the crate's own rlib, or via an unchanged dependency; runtime

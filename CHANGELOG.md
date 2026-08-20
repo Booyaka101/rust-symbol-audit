@@ -4,6 +4,55 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] — 2026-08-20
+
+The provenance lane now reads publish age and notices a version the registry has
+deleted. Built against the
+[2026-08-20 supply chain attack on arrayref](https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/):
+malicious versions of `arrayref`, `internment` and `append-only-vec` (carrying
+the `proc-macro1` typosquat, whose build script downloads and runs a payload)
+were live for 86, 90 and 107 minutes and were then **deleted** from crates.io,
+not yanked. Before this release the lane had two blind spots against exactly
+that: it never read `created_at`, so a version published twelve minutes ago
+audited the same as one from 2024, and a version deleted from the registry
+produced **zero** findings, because every check was guarded on finding the
+version in the crates.io response.
+
+⚠️ **This changes verdicts.** A PR bumping to a version younger than the window
+(default 24 h), or to one crates.io no longer lists, now tiers `high`: it will
+newly fail `fail-on: high`, and `recommendation` becomes `review` instead of
+`auto-merge`. Set `min-publish-age-hours: "0"` to keep the old tiering (the
+age still shows in the comment).
+
+### Added
+
+- **`fresh-version` finding** — the new version's `created_at` is read from the
+  crates.io response the lane already fetches (no new network request) and
+  compared against UTC now. Inside the window: tier `high`, with the real age
+  and the incident context in the detail. Outside: a `none`-tier note carrying
+  the age, so the comment always shows it. The window is the new
+  `min-publish-age-hours` input (default `24`; `0` disables the tiering and
+  keeps the note). A missing or malformed `created_at` is a note, never a
+  finding.
+- **`version-not-on-registry` finding** (tier `high`) — the audited version is
+  absent from the crates.io versions array, i.e. removed from the registry,
+  which is how crates.io responds to a malicious publish. This is the
+  `arrayref 0.3.10` shape and it fires for newly-added crates too. The
+  offline/disabled path still emits `provenance-unknown` and nothing else
+  (asserted byte-identical in the suite).
+- **Publish age inline in the comment** — every audited bump renders as e.g.
+  `` `0.3.9` → `0.3.10` (published 41 minutes ago) ``, in flagged sections and
+  the collapsed clean list both.
+- Like every provenance finding, **neither new finding is suppressed by a
+  review-ledger sign-off** — the suite asserts the property for both, alongside
+  the existing advisory/provenance-survive-sign-off tests.
+- Prior art named in the README rather than implied away: Dependabot's default
+  cooldown, Renovate `minimumReleaseAge`, cargo-cooldown, and Cargo RFC 3923
+  (`-Zmin-publish-age`, nightly-only, and by design silent about versions
+  already in the lockfile — which is what a review gate looks at).
+- Local suite grown to **94 checks** (was 71): fresh/old/deleted-version
+  fixtures, window `0`, sign-off survival, and the offline path.
+
 ## [3.2.0] — 2026-08-13
 
 Faster, and it no longer clears a bump it never actually looked at. ⚠️ The fix
@@ -205,6 +254,7 @@ capabilities as a PR comment.
 - **Consumer example** (`examples/pr-audit.yml`) and docs (`README.md`,
   `TESTING.md`).
 
+[3.3.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.3.0
 [3.2.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.2.0
 [3.1.1]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.1.1
 [3.1.0]: https://github.com/booyaka101/rust-symbol-audit/releases/tag/v3.1.0

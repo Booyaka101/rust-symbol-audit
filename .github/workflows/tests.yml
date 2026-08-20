@@ -39,7 +39,7 @@ jobs:
       - name: Install rustfilt (demangler)
         run: command -v rustfilt >/dev/null 2>&1 || cargo install rustfilt --quiet
 
-      - name: Run acceptance suite (48 checks)
+      - name: Run acceptance suite
         env:
           WORK: ${{ runner.temp }}/rsa-local
         run: bash test/run_local.sh

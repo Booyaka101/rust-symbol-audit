@@ -1,72 +1,62 @@
 # PROGRESS — rust-symbol-audit
 
-Status: **v3.0.0 — COMPLETE & VERIFIED locally.** All acceptance checks pass via
-`test/run_local.sh` (**46/46 green**). Remaining work is owner-only: push to
-GitHub, run the live Action once (TESTING.md §2 — includes the network lanes,
-which local testing can only mock), publish to Marketplace.
+Status: **v3.3.0 — built & verified locally on branch `feat/publish-age`.**
+Local suite green (see count below; baseline before this release was 71).
+Remaining work is owner-only: merge the PR, wait for CI green on the merge
+commit, tag `v3.3.0`, publish the release (major-tag.yml then moves `v3`).
 
-## What v3 is
-A capability-creep triage **gate** for Rust dependency PRs. Five lanes merged per
-crate into one sticky comment, made blockable by a stateful review ratchet.
+## What v3.3.0 adds (the arrayref-incident release)
 
-Lanes:
-1. **symbols** — v0-demangled rlib diff, pattern-tiered.
-2. **compile-time** (`inspect_source.sh`) — build.rs / proc-macro / links; shows
-   the actual build-script diff. Runs even if the crate won't build as a lib.
-3. **dependencies** — crates newly pulled into the resolved tree.
-4. **provenance** (`provenance.sh`, network) — crates.io publisher / source-repo /
-   yank change. Mock: `RSA_CRATESIO_FIXTURE`.
-5. **advisories** (`advisories.sh`, network) — RustSec via OSV.dev. Mock:
-   `RSA_ADVISORY_FIXTURE`.
+Built against the 2026-08-20 Rust Security Response Team advisory ("Supply
+chain attack on arrayref"): malicious versions of arrayref / internment /
+append-only-vec were live 86–107 minutes, then **deleted** from crates.io (not
+yanked). Two verified blind spots in the provenance lane, both closed using the
+crates.io response it already fetches (no new network request):
 
-Ratchet + product:
-- **Review ledger** `.rust-symbol-audit/reviews.toml` (`read_reviews.py`,
-  `review.sh`): sign off a version once; future bumps alarm only on the
-  unreviewed delta. Comment shows a sign-off snippet + "reviewed ✅". A sign-off
-  suppresses ONLY the capability lanes — advisories/provenance always surface.
-- **config** `.rust-symbol-audit.toml` (`read_config.py`): ignore/allow.
-- **sticky comment** + job summary (`post_comment.sh`); **fail-on** gating.
-- **Dependabot triage**: `recommendation` output + bot banner; `examples/auto-merge.yml`.
-- **Evidence**: `audit-report.json` (`build_report.py`), uploaded as an artifact.
+1. **`fresh-version`** — reads the new version's `created_at` (UTC-only),
+   compares against now. Inside `min-publish-age-hours` (new input, default 24,
+   `0` = note only) → tier `high` with the real age + incident context.
+   Outside → `none`-tier note carrying the age. Missing/malformed date → note,
+   never a finding. Age also renders inline next to every audited bump in the
+   comment (`` `0.3.9` → `0.3.10` (published 41 minutes ago) ``).
+2. **`version-not-on-registry`** — audited version absent from the versions
+   array (deleted from the registry) → tier `high`. Fires before/independently
+   of the age check; newly-added crates get it too. Offline/disabled path still
+   emits `provenance-unknown` byte-identically (asserted).
 
-## Verified locally (Git Bash + MSVC toolchain, 46/46)
-A–J as before (symbols, parse, full pipeline, real crates.io bump, build.rs lane,
-proc-macro, config, dep-tree, gating, sticky marker). Plus:
-- **K** ledger ratchet: signed-off version → tier none + "reviewed ✅".
-- **L** advisory/provenance survive a stale sign-off (publisher swap still HIGH).
-- **M** provenance publisher-change (mock crates.io).
-- **N** advisory detection (mock OSV).
-- **O** Dependabot recommendation (review vs auto-merge) + banner.
-- **P** `audit-report.json` well-formed (critical verdict + per-crate symbols).
-- **Q** comment shows the actual build.rs code.
-- **R** `read_reviews.py` ALL vs ACCEPT normalization.
+Both flow through the normal tier/recommendation computation (so
+`fail-on: high` fails and auto-merge flips to review) and are **never
+suppressed by a ledger sign-off** (tested, same property as advisories).
 
-Run: `bash test/run_local.sh` → `RESULT: 46 passed, 0 failed`.
+## Verified this session (2026-08-20)
 
-## Files
-- `action.yml` — inputs: github-token, max-crates, fail-on, config, reviews,
-  check-provenance, check-advisories. Outputs: changed, tier, flagged,
-  build-script-changes, advisories, recommendation, report. Uploads the evidence
-  artifact.
-- `scripts/` — lib.sh, read_config.py, read_reviews.py, review.sh,
-  parse_lockdiff.sh, build_crate.sh, diff_symbols.sh, inspect_source.sh,
-  provenance.sh, advisories.sh, risk_check.sh, build_report.py, post_comment.sh,
-  run_audit.sh (orchestrator).
-- `test/` — run_local.sh + fixtures netcap-0.{1,2,3}.0, procm-0.{1,2}.0,
-  cratesio/netcap.json, osv/vulncrate-1.0.0.json.
-- `examples/` — pr-audit.yml, auto-merge.yml, rust-symbol-audit.toml.
-- README.md, TESTING.md, CHANGELOG.md, LICENSE.
+- Baseline before edits: `bash test/run_local.sh` → **71 passed / ALL GREEN**.
+- Live acceptance: `provenance.sh arrayref '' 0.3.10` → high
+  `version-not-on-registry`; `provenance.sh arrayref 0.3.8 0.3.9` → none-tier
+  age note ("published 705 days ago") and nothing else.
+- Phase-0 re-verified live: crates.io API carries `created_at` on every version
+  object and no longer lists arrayref 0.3.10; RFC 3923 is nightly-only
+  (`-Zmin-publish-age`) and skips versions already in Cargo.lock.
+- New tests Z (fresh, incl. window 0), AA (years-old), AB (deleted version,
+  incl. newly-added crate), AC (offline path byte-identical). Fresh fixture's
+  `created_at` is computed at test time (now − 41 min); the old fixture is a
+  static 2024 date, so the suite stays deterministic as it ages.
 
-## Design notes
-- **Ledger suppresses only capability lanes.** A later advisory or provenance
-  change must never be hidden by an old sign-off (verified by test L).
-- **Network lanes degrade gracefully** and are skipped for local fixtures unless a
-  mock is provided, so the offline suite is deterministic.
-- **Honest ceiling** unchanged: static analysis, not a sandbox; misses
-  uninstantiated-generic capability and unchanged-dependency capability.
+## Files touched in 3.3.0
+
+- `scripts/provenance.sh` — the two findings, age formatting, `publish_age.txt`,
+  `PYTHONUTF8=1` (Windows python died on em dashes in details).
+- `scripts/run_audit.sh` — `RSA_MIN_PUBLISH_AGE_HOURS` threading, inline age in
+  verstr + clean list, two new headline reasons.
+- `action.yml` — `min-publish-age-hours` input.
+- `test/fixtures/cratesio/` — netcap.json (+`created_at`),
+  netcap-fresh.json.template, netcap-old.json, netcap-ghost.json.
+- `test/run_local.sh` — tests Z/AA/AB/AC.
+- README (lane #4, inputs table, prior-art section, catches list), CHANGELOG.
 
 ## Next steps (owner)
-1. `git push` to `booyaka101/rust-symbol-audit`; push tags `v3.0.0` and `v3`.
-2. TESTING.md §2 — live PR run; confirm sticky upsert, the ratchet, and the
-   network lanes (advisory/provenance) firing on a real crate.
-3. Publish to GitHub Marketplace (Security category).
+
+1. Merge PR for `feat/publish-age`; confirm CI green on the exact merge commit
+   (check-runs API, not `gh run watch`).
+2. Tag `v3.3.0` + GitHub release (major-tag.yml moves `v3` on publish).
+3. Optional: re-run the live demo PR to show the new inline ages.
