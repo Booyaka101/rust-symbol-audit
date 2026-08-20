@@ -50,8 +50,18 @@ age still shows in the comment).
   cooldown, Renovate `minimumReleaseAge`, cargo-cooldown, and Cargo RFC 3923
   (`-Zmin-publish-age`, nightly-only, and by design silent about versions
   already in the lockfile — which is what a review gate looks at).
-- Local suite grown to **94 checks** (was 71): fresh/old/deleted-version
+- Local suite grown to **95 checks** (was 71): fresh/old/deleted-version
   fixtures, window `0`, sign-off survival, and the offline path.
+
+### Fixed
+
+- **Bot-bump comments lost the rule above the legend.** Prepending the
+  Dependabot/Renovate banner went through `"$(cat "$SECTIONS")"`, and command
+  substitution strips trailing newlines, so the closing `---` landed glued to
+  the last block (`</details>---`) and stopped rendering as a horizontal rule.
+  The banner is now prepended by streaming the file. Only affected bot-authored
+  PRs, which is most of the ones this tool sees. Found by rendering a real
+  comment through GitHub's markdown API rather than reading the raw text.
 
 ## [3.2.0] — 2026-08-13
 

@@ -1,7 +1,7 @@
 # PROGRESS — rust-symbol-audit
 
 Status: **v3.3.0 — built & verified locally on branch `feat/publish-age`.**
-Local suite green (see count below; baseline before this release was 71).
+Local suite green: 95 passed, 0 failed (baseline before this release was 71).
 Remaining work is owner-only: merge the PR, wait for CI green on the merge
 commit, tag `v3.3.0`, publish the release (major-tag.yml then moves `v3`).
 

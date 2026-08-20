@@ -179,7 +179,7 @@ lister (GNU `nm`, or `rustup component add llvm-tools` → `llvm-nm`, auto-detec
 on Windows). In **Git Bash**:
 
 ```bash
-bash test/run_local.sh      # -> RESULT: 94 passed, 0 failed / ALL GREEN
+bash test/run_local.sh      # -> RESULT: 95 passed, 0 failed / ALL GREEN
 ```
 
 Exercises all five lanes, the ledger ratchet, config suppression, gating, the

@@ -373,7 +373,9 @@ if [ "$is_bot" -eq 1 ]; then
   else
     banner="> 🤖 **Bot dependency bump — ⚠️ changed the risk surface (see below). Review before merging.**"
   fi
-  printf '%s\n\n%s' "$banner" "$(cat "$SECTIONS")" > "$SECTIONS.tmp" && mv "$SECTIONS.tmp" "$SECTIONS"
+  # Prepend by streaming, not "$(cat)": command substitution strips the trailing
+  # newlines and the next block's `---` then glues onto the last `</details>`.
+  { printf '%s\n\n' "$banner"; cat "$SECTIONS"; } > "$SECTIONS.tmp" && mv "$SECTIONS.tmp" "$SECTIONS"
 fi
 
 # --- machine-readable evidence report --------------------------------------

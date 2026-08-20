@@ -318,6 +318,12 @@ LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$OWORK/r" REVIEWS="/nonexistent" PR_AUT
   "$SCRIPTS/run_audit.sh" >/dev/null 2>"$OWORK/r.log"
 have "$OWORK/r_out.txt" 'recommendation=review' && ok "risky bot bump -> recommendation=review" || bad "expected recommendation=review"
 have "$OWORK/r/comment_body.md" 'Bot dependency bump' && ok "bot banner present in comment" || bad "bot banner missing"
+# Prepending the banner used to go through "$(cat)", which strips the sections
+# file's trailing newlines -- the closing legend's `---` then landed glued to the
+# last block ("</details>---") and stopped rendering as a rule.
+grep -qE '^(</details>|.+)---$' "$OWORK/r/comment_body.md" \
+  && bad "banner path glued a block to the trailing '---' rule" \
+  || ok "bot banner keeps the sections' trailing newlines (no glued '---')"
 LOCKDIFF_TSV="$CWORK/lockdiff.tsv" WORK="$OWORK/a" REVIEWS="$KWORK/reviews.toml" PR_AUTHOR="dependabot[bot]" \
   RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$OWORK/a_out.txt" \
   "$SCRIPTS/run_audit.sh" >/dev/null 2>"$OWORK/a.log"
