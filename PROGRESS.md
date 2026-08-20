@@ -1,9 +1,14 @@
 # PROGRESS — rust-symbol-audit
 
-Status: **v3.3.0 — built & verified locally on branch `feat/publish-age`.**
-Local suite green: 95 passed, 0 failed (baseline before this release was 71).
-Remaining work is owner-only: merge the PR, wait for CI green on the merge
-commit, tag `v3.3.0`, publish the release (major-tag.yml then moves `v3`).
+Status: **v3.3.0 — SHIPPED 2026-08-20.** PR #19 squash-merged to main as
+`2223e09`, CI green on that exact commit, tagged `v3.3.0` and released;
+`major-tag.yml` moved `v3` to the same commit, so consumers pinned at
+`@v3` are on 3.3.0. Local suite: 95 passed, 0 failed (baseline was 71).
+
+Not done, and owner-only: the **Marketplace listing** still advertises the
+previous release. Updating it means ticking "Publish this Action to the GitHub
+Marketplace" on the release edit page, which triggers GitHub's sudo-mode TOTP
+prompt. No CLI or REST path exists for it.
 
 ## What v3.3.0 adds (the arrayref-incident release)
 
@@ -61,7 +66,11 @@ suppressed by a ledger sign-off** (tested, same property as advisories).
 
 ## Next steps (owner)
 
-1. Merge PR for `feat/publish-age`; confirm CI green on the exact merge commit
-   (check-runs API, not `gh run watch`).
-2. Tag `v3.3.0` + GitHub release (major-tag.yml moves `v3` on publish).
-3. Optional: re-run the live demo PR to show the new inline ages.
+1. **Marketplace**: republish the listing from the v3.3.0 release page (TOTP
+   step, see above).
+2. Re-run the live demo PR (`rust-symbol-audit-demo#1`) against `@v3` so the
+   README's demo link shows the new inline publish ages. This is also the only
+   remaining end-to-end proof of the published tag running as a consumed
+   action rather than from a local checkout.
+3. Expect questions from anyone on `fail-on: high` whose next bump is under 24 h
+   old. The answer is `min-publish-age-hours: "0"`, or a smaller window.
