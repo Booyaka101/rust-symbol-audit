@@ -5,10 +5,11 @@ Status: **v3.3.0 — SHIPPED 2026-08-20.** PR #19 squash-merged to main as
 `major-tag.yml` moved `v3` to the same commit, so consumers pinned at
 `@v3` are on 3.3.0. Local suite: 95 passed, 0 failed (baseline was 71).
 
-Not done, and owner-only: the **Marketplace listing** still advertises the
-previous release. Updating it means ticking "Publish this Action to the GitHub
-Marketplace" on the release edit page, which triggers GitHub's sudo-mode TOTP
-prompt. No CLI or REST path exists for it.
+Verified after the release: the **Marketplace listing already serves v3.3.0**
+(no TOTP step was needed; an action that is already listed picks up new
+releases on its own), and the **demo PR was re-run against the published
+`@v3`**, so the tag is proven working as a consumed action and not just from a
+local checkout.
 
 ## What v3.3.0 adds (the arrayref-incident release)
 
@@ -64,13 +65,26 @@ suppressed by a ledger sign-off** (tested, same property as advisories).
 - README (lane #4, inputs table, prior-art section, catches list, screenshot),
   CHANGELOG.
 
+## End-to-end proof of the published tag
+
+`rust-symbol-audit-demo#1` re-run on 2026-08-20 against `@v3` (run
+32387725119, success). The sticky comment it posted carries the 3.3.0 feature
+in production:
+
+```
+### smallvec new -> 1.6.0 (published 5 years ago) - HIGH
+- RUSTSEC-2021-0003 - Buffer overflow in SmallVec::insert_many
+  once_cell 1.19.0 -> 1.20.2 (published 683 days ago)
+```
+
+Both the newly-added-crate path and the clean-list path show the age, and the
+advisory lane is unaffected.
+
 ## Next steps (owner)
 
-1. **Marketplace**: republish the listing from the v3.3.0 release page (TOTP
-   step, see above).
-2. Re-run the live demo PR (`rust-symbol-audit-demo#1`) against `@v3` so the
-   README's demo link shows the new inline publish ages. This is also the only
-   remaining end-to-end proof of the published tag running as a consumed
-   action rather than from a local checkout.
-3. Expect questions from anyone on `fail-on: high` whose next bump is under 24 h
-   old. The answer is `min-publish-age-hours: "0"`, or a smaller window.
+1. Nothing is blocking. Expect questions from anyone on `fail-on: high` whose
+   next bump is under 24 h old; the answer is `min-publish-age-hours: "0"` or a
+   smaller window.
+2. Optional: announce it. The arrayref incident is the hook, and the honest
+   framing is the one in the README's prior-art section rather than a claim to
+   have invented cooldown.
