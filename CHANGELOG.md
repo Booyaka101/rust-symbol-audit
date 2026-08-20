@@ -48,8 +48,11 @@ age still shows in the comment).
   the existing advisory/provenance-survive-sign-off tests.
 - Prior art named in the README rather than implied away: Dependabot's default
   cooldown, Renovate `minimumReleaseAge`, cargo-cooldown, and Cargo RFC 3923
-  (`-Zmin-publish-age`, nightly-only, and by design silent about versions
-  already in the lockfile — which is what a review gate looks at).
+  (`min-publish-age`, whose stabilization PR rust-lang/cargo#17335 is in final
+  comment period, so it is landing soon and is the real fix for the resolution
+  side). What none of them cover is the carve-out they share: by design the
+  resolver leaves a too-young version alone once it is already in the lockfile,
+  which is exactly what a review gate is looking at.
 - Local suite grown to **95 checks** (was 71): fresh/old/deleted-version
   fixtures, window `0`, sign-off survival, and the offline path.
 

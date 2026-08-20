@@ -88,11 +88,16 @@ Cooldown is not a new idea and this tool didn't invent it. Dependabot ships a
 default 3-day cooldown (July 2026), Renovate has `minimumReleaseAge`,
 [cargo-cooldown](https://crates.io/crates/cargo-cooldown) exists, and Cargo's own
 [RFC 3923 min-publish-age](https://rust-lang.github.io/rfcs/3923-cargo-min-publish-age.html)
-is implemented on nightly as `-Zmin-publish-age` (tracking issue
-rust-lang/cargo#17009), not stable. Those all act at *resolution* time, and the
-RFC is explicit that the resolver ignores too-young versions "unless they
-already exist in the `Cargo.lock` file". A version already pinned in the diff
-you're reviewing is exactly that case.
+is **stabilizing**: the stabilization PR (rust-lang/cargo#17335, tracking issue
+#17009) is in final comment period with disposition-merge, so it lands in a
+coming release, and the Cargo team has said they're considering enabling it by
+default. Treat that as the real fix for the resolution side.
+
+What none of them cover is the same carve-out. They all act at *resolution*
+time, and the RFC is explicit that the resolver ignores too-young versions
+"unless they already exist in the `Cargo.lock` file". A version already pinned
+in the diff you're reviewing is exactly that case: it arrived in a bot's PR or
+a teammate's branch, and resolution is over by the time you're looking at it.
 
 What this adds: rust-symbol-audit is a review gate that reads the lockfile diff
 *after* resolution and emits a merge recommendation, and until 3.3.0 it did so

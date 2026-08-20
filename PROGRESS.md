@@ -41,8 +41,12 @@ suppressed by a ledger sign-off** (tested, same property as advisories).
   `version-not-on-registry`; `provenance.sh arrayref 0.3.8 0.3.9` → none-tier
   age note ("published 705 days ago") and nothing else.
 - Phase-0 re-verified live: crates.io API carries `created_at` on every version
-  object and no longer lists arrayref 0.3.10; RFC 3923 is nightly-only
-  (`-Zmin-publish-age`) and skips versions already in Cargo.lock.
+  object and no longer lists arrayref 0.3.10; RFC 3923 skips versions already
+  in Cargo.lock. **Corrected 2026-08-21:** min-publish-age is not nightly-only
+  for much longer. Stabilization PR rust-lang/cargo#17335 is in FCP with
+  disposition-merge, confirmed via the GitHub API after a Cargo maintainer said
+  so in the r/rust arrayref thread. The lockfile carve-out is the durable part
+  of our positioning, not the fact that it was unstable.
 - New tests Z (fresh, incl. window 0), AA (years-old), AB (deleted version,
   incl. newly-added crate), AC (offline path byte-identical). Fresh fixture's
   `created_at` is computed at test time (now − 41 min); the old fixture is a
