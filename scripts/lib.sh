@@ -10,6 +10,10 @@
 NM="${NM:-nm}"
 RUSTFILT="${RUSTFILT:-rustfilt}"
 
+# Directory this library lives in, so helpers can find sibling scripts
+# (fetch_exec.py) regardless of which script sourced lib.sh.
+RSA_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 log() { printf '[rust-symbol-audit] %s\n' "$*" >&2; }
 
 # Hidden marker embedded in the PR comment so we can find & update our own
@@ -40,6 +44,18 @@ tier_rank() {
     medium)   echo 1 ;;
     *)        echo 0 ;;
   esac
+}
+
+# max_tier <findings_tsv> -> the highest tier in column 1, "none" for a missing
+# or empty file. Every lane script folds its findings down to one tier this way.
+max_tier() {
+  local f="${1:-}" o="none" t
+  [ -n "$f" ] && [ -f "$f" ] || { echo none; return; }
+  while IFS=$'\t' read -r t _rest; do
+    [ -n "$t" ] || continue
+    if [ "$(tier_rank "$t")" -gt "$(tier_rank "$o")" ]; then o="$t"; fi
+  done < "$f"
+  echo "$o"
 }
 
 # tier_emoji <tier> -> a leading emoji for markdown.
@@ -98,6 +114,93 @@ crate_src_dir() {
   d="$(find "$cargo_home/registry/src" -maxdepth 2 -type d -name "${crate}-${version}" 2>/dev/null | head -1)"
   [ -n "$d" ] && printf '%s\n' "$d"
 }
+
+# --- compile-time source inspection (shared by inspect_source.sh for the
+# --- audited crate and inspect_new_dep.sh for newly-pulled dependencies) ----
+
+# Tokens that turn a build script / proc-macro from "worth a glance" into
+# "alarming": process spawning, networking, filesystem writes, base64 blobs,
+# shelling out. Case-insensitive.
+SRC_ALARM='process::command|command::new|::exec|tcpstream|udpsocket|std::net|reqwest|ureq|hyper|http[s]?://|curl |wget |[^a-z]download|include_bytes!|/bin/sh|/bin/bash|powershell|cmd\.exe|base64|std::fs::write|openoptions|::set_var'
+
+# The two halves of the proc-macro1 shape (2026-08-20): a build script that
+# FETCHES something remote AND EXECUTES something. Either half alone is normal
+# (proc-macro2/libc/serde all invoke rustc via Command::new in build.rs), so
+# both together is the download-and-run pattern. Kept separate from SRC_ALARM so
+# the audited-crate lane's tiering is unchanged.
+#
+# FETCH is deliberately about invoking a network CLIENT or download tool, NOT
+# about a URL appearing anywhere: measured over 1810 real crate versions, a bare
+# `http[s]?://` rule fired on 61 of the most-downloaded crates in the ecosystem
+# (serde, proc-macro2, quote, thiserror, libc, anyhow, zerocopy...) because they
+# carry blog/issue/license URLs in comments and error strings. Requiring a real
+# client (reqwest/ureq/curl/wget/raw sockets) and stripping comments first (see
+# fetch_exec.py) takes that to 0 while still catching the curl-based payload.
+SRC_FETCH='reqwest|ureq|isahc|attohttpc|minreq|\bhyper\b|\bcurl\b|\bwget\b|tcpstream|udpsocket|std::net'
+SRC_EXEC='process::command|command::new|::exec|::spawn|/bin/sh|/bin/bash|powershell|cmd\.exe'
+
+# manifest_has <src_dir> <regex> -> 0 if that dir's Cargo.toml matches.
+manifest_has() {
+  [ -n "$1" ] && [ -f "$1/Cargo.toml" ] && grep -qiE "$2" "$1/Cargo.toml"
+}
+
+# build_rs_path <src_dir> -> path to the build script if the crate has one,
+# including a custom `build = "path"` in [package]. Always exits 0.
+build_rs_path() {
+  local d="$1" p
+  [ -n "$d" ] || return 0
+  if [ -f "$d/build.rs" ]; then printf '%s\n' "$d/build.rs"; return 0; fi
+  p="$(grep -E '^[[:space:]]*build[[:space:]]*=' "$d/Cargo.toml" 2>/dev/null \
+        | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | head -1 || true)"
+  if [ -n "$p" ] && [ -f "$d/$p" ]; then printf '%s\n' "$d/$p"; fi
+  return 0
+}
+
+# inspect_crate_dir <src_dir> -> compile-time facts for ONE source directory
+# (no old side), as key<TAB>value lines on stdout:
+#   build_script <path>      the build script, if any (incl. custom `build =`)
+#   readable     0|1         could the build script actually be read
+#   alarm        0|1         build script matches SRC_ALARM
+#   fetch_exec   0|1         build script matches SRC_FETCH AND SRC_EXEC
+#   proc_macro   0|1         Cargo.toml declares proc-macro = true
+#   links        <lib>       Cargo.toml declares links = "<lib>"
+# Emits nothing for a missing dir. Both the audited-crate diff and the
+# new-dependency classifier read these same facts.
+inspect_crate_dir() {
+  local d="$1" bs lib
+  [ -n "$d" ] && [ -d "$d" ] || return 0
+  bs="$(build_rs_path "$d" || true)"
+  if [ -n "$bs" ]; then
+    printf 'build_script\t%s\n' "$bs"
+    if [ -r "$bs" ] && grep -q '' "$bs" 2>/dev/null; then
+      printf 'readable\t1\n'
+      # alarm keeps its raw-grep semantics (the audited-crate lane's tiering is
+      # unchanged); fetch_exec strips comments first so a URL in a comment or an
+      # error string does not read as a fetch. See fetch_exec.py.
+      printf 'alarm\t%s\n' "$(grep -qiE "$SRC_ALARM" "$bs" 2>/dev/null && echo 1 || echo 0)"
+      if SRC_FETCH="$SRC_FETCH" SRC_EXEC="$SRC_EXEC" python3 "$RSA_LIB_DIR/fetch_exec.py" "$bs" 2>/dev/null; then
+        printf 'fetch_exec\t1\n'
+      else
+        printf 'fetch_exec\t0\n'
+      fi
+    else
+      printf 'readable\t0\nalarm\t0\nfetch_exec\t0\n'
+    fi
+  fi
+  if manifest_has "$d" '^[[:space:]]*proc-macro[[:space:]]*=[[:space:]]*true'; then
+    printf 'proc_macro\t1\n'
+  else
+    printf 'proc_macro\t0\n'
+  fi
+  if manifest_has "$d" '^[[:space:]]*links[[:space:]]*='; then
+    lib="$(grep -E '^[[:space:]]*links[[:space:]]*=' "$d/Cargo.toml" \
+            | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | head -1 || true)"
+    printf 'links\t%s\n' "${lib:-unknown}"
+  fi
+}
+
+# fact <key> <facts_file> -> value of the first matching key, empty if absent.
+fact() { awk -F'\t' -v k="$1" '$1==k{print $2; exit}' "$2" 2>/dev/null; }
 
 # pkg_set <cargo_lock> -> sorted-unique "name version" for every [[package]].
 # Used to diff the resolved dependency *tree* of the old vs new build (each

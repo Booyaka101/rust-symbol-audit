@@ -15,6 +15,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
 . "$HERE/lib.sh"
 
+# Advisory summaries are UTF-8 prose; Windows python otherwise decodes/encodes
+# cp1252 and dies writing advisory.json (Linux runners are unaffected, which is
+# why this survived: the TSV is written by an earlier block, so a grep on it
+# still passed). Same fix provenance.sh carries.
+export PYTHONUTF8=1
+
 CRATE="${1:?crate required}"
 VERSION="${2:-}"
 OUTDIR="${3:-${WORK:-/tmp/rsa}}"
@@ -101,11 +107,7 @@ for g in groups:
     print("%s\tadvisory\t[%s](%s)%s — %s" % (tier, primary, url_for(primary), alias_str, summ))
 PY
 
-overall="none"
-while IFS=$'\t' read -r t _rest; do
-  [ -n "$t" ] || continue
-  if [ "$(tier_rank "$t")" -gt "$(tier_rank "$overall")" ]; then overall="$t"; fi
-done < "$TSV"
+overall="$(max_tier "$TSV")"
 
 OVERALL="$overall" python3 - "$TSV" > "$JSON" <<'PY'
 import json, os, sys

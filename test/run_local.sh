@@ -306,8 +306,19 @@ echo
 echo "### TEST N — advisories.sh detects a RustSec/OSV advisory (mock)"
 N2WORK="$WORK/n2"; mkdir -p "$N2WORK"
 RSA_ADVISORY_FIXTURE="$FIX/osv" "$SCRIPTS/advisories.sh" vulncrate 1.0.0 "$N2WORK" >/dev/null 2>"$N2WORK/n.log"
+NRC=$?
 echo "  --- advisory_findings.tsv ---"; sed 's/^/    /' "$N2WORK/advisory_findings.tsv" 2>/dev/null
 have "$N2WORK/advisory_findings.tsv" 'RUSTSEC-2099-0001' && ok "advisory RUSTSEC-2099-0001 detected via OSV mock" || bad "advisory not detected"
+# The TSV is written by an earlier python block than the JSON, so asserting only
+# on the TSV cannot see the lane dying halfway. It did: on Windows the second
+# block hit cp1252 and advisories.json was never written, for three releases,
+# with this test green. Assert the exit code and the JSON too.
+[ "$NRC" -eq 0 ] && ok "advisories.sh exits 0 on a hit (not a half-run lane)" || bad "advisories.sh exited $NRC"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['tier']=='high' and d['findings'][0]['kind']=='advisory'" "$N2WORK/advisories.json" 2>/dev/null \
+  && ok "advisories.json written and well-formed (the half-run this test used to miss)" || bad "advisories.json missing/malformed"
+grep -q '�' "$N2WORK/advisory_findings.tsv" 2>/dev/null \
+  && bad "advisory detail carries a replacement char (cp1252 mangling is back)" \
+  || ok "advisory detail survives non-ASCII intact (PYTHONUTF8)"
 echo
 
 # ===========================================================================
@@ -620,6 +631,163 @@ printf '{"tier":"none","findings":[{"tier":"none","kind":"provenance-unknown","d
 cmp -s "$ACWORK/expected.json" "$ACWORK/provenance.json" \
   && ok "offline provenance.json byte-identical" || bad "offline JSON drifted"
 [ ! -f "$ACWORK/publish_age.txt" ] && ok "no publish age manufactured offline" || bad "publish_age.txt written offline"
+echo
+
+# ===========================================================================
+echo "### TEST AD — new-dependency source lane: the 2026-08-20 arrayref shape"
+# carrier's own lib source is byte-identical across versions; 0.2.0 adds ONE
+# manifest line pulling in dlmacro, whose build.rs downloads and executes a
+# remote payload (the proc-macro1 1.0.107 shape). The symbol and source lanes
+# see nothing on carrier itself; the new-dependency lane is what catches it.
+export RSA_FIXTURES="$FIX"
+ADWORK="$WORK/ad"; mkdir -p "$ADWORK/cratesio"
+# dlmacro published 2 days ago (young) + 0 downloads -> critical; template keeps
+# the fixture deterministic as the suite ages.
+python3 - "$FIX/cratesio/dlmacro.json.template" "$ADWORK/cratesio/dlmacro.json" <<'PY'
+import sys
+from datetime import datetime, timedelta, timezone
+ts = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+open(sys.argv[2], "w").write(open(sys.argv[1]).read().replace("__CREATED_AT__", ts))
+PY
+# carrier's own lib source really is identical old vs new (prove the shape).
+cmp -s "$FIX/carrier-0.1.0/src/lib.rs" "$FIX/carrier-0.2.0/src/lib.rs" \
+  && ok "carrier lib source is byte-identical 0.1.0 -> 0.2.0 (arrayref shape)" \
+  || bad "carrier fixture drifted: lib source differs, the shape is not reproduced"
+# unit: the classifier alone
+RSA_CRATESIO_FIXTURE="$ADWORK/cratesio" "$SCRIPTS/inspect_new_dep.sh" dlmacro 1.0.0 "$ADWORK/dl" >/dev/null 2>"$ADWORK/dl.log"
+echo "  --- newdep_findings.tsv ---"; sed 's/^/    /' "$ADWORK/dl/newdep_findings.tsv" 2>/dev/null
+awk -F'\t' '$1=="critical"&&$2=="new-dep-build-script"{f=1} END{exit !f}' "$ADWORK/dl/newdep_findings.tsv" \
+  && ok "young + zero-download downloader build script -> critical" || bad "expected critical new-dep-build-script"
+have "$ADWORK/dl/newdep_findings.tsv" 'downloads and executes a remote payload' && ok "detail names the download-and-execute behaviour" || bad "download-execute detail missing"
+have "$ADWORK/dl/newdep_findings.tsv" '0 total downloads' && ok "detail carries the crate's downloads" || bad "downloads missing from detail"
+[ -s "$ADWORK/dl/build_rs_excerpt.txt" ] && ok "build-script excerpt captured for inline rendering" || bad "no build-script excerpt"
+# full pipeline
+printf 'carrier\t0.1.0\t0.2.0\n' > "$ADWORK/lockdiff.tsv"
+LOCKDIFF_TSV="$ADWORK/lockdiff.tsv" WORK="$ADWORK/run" REVIEWS="/nonexistent" \
+  RSA_CRATESIO_FIXTURE="$ADWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$ADWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$ADWORK/run.log"
+have "$ADWORK/out.txt" 'tier=critical' && ok "arrayref shape tiers CRITICAL end to end" \
+  || bad "expected tier=critical ($(grep '^tier=' "$ADWORK/out.txt" 2>/dev/null))"
+have "$ADWORK/out.txt" 'recommendation=review' && ok "recommendation flips to review" || bad "expected recommendation=review"
+have "$ADWORK/run/comment_body.md" 'downloads and executes a remote payload' && ok "comment carries the critical dependency finding" || bad "critical finding missing from comment"
+have "$ADWORK/run/comment_body.md" 'show build script of .dlmacro. 1.0.0' && ok "comment renders the dependency's build-script excerpt inline" || bad "no inline build-script excerpt in comment"
+have "$ADWORK/run/comment_body.md" 'Sign off dependency .dlmacro. 1.0.0' && ok "comment offers the dependency sign-off snippet" || bad "no dependency sign-off snippet"
+echo
+
+# ===========================================================================
+echo "### TEST AE — new-dep lane: benign build.rs, and sign-off directions"
+export RSA_FIXTURES="$FIX"
+AEWORK="$WORK/ae"; mkdir -p "$AEWORK/cratesio"
+cp "$FIX/cratesio/pm2like.json" "$AEWORK/cratesio/"
+python3 - "$FIX/cratesio/dlmacro.json.template" "$AEWORK/cratesio/dlmacro.json" <<'PY'
+import sys
+from datetime import datetime, timedelta, timezone
+ts = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+open(sys.argv[2], "w").write(open(sys.argv[1]).read().replace("__CREATED_AT__", ts))
+PY
+# NEGATIVE: pm2like ships a build.rs that shells out to rustc (like
+# proc-macro2/serde/libc). Execution present, no remote fetch -> never an alarm.
+RSA_CRATESIO_FIXTURE="$AEWORK/cratesio" "$SCRIPTS/inspect_new_dep.sh" pm2like 1.0.0 "$AEWORK/pm" >/dev/null 2>"$AEWORK/pm.log"
+echo "  --- pm2like newdep_findings.tsv ---"; sed 's/^/    /' "$AEWORK/pm/newdep_findings.tsv" 2>/dev/null
+awk -F'\t' '$1=="none"&&$2=="new-dep-build-script"{f=1} END{exit !f}' "$AEWORK/pm/newdep_findings.tsv" \
+  && ok "established crate's rustc-probing build.rs -> none-tier note (no false alarm)" || bad "pm2like wrongly tiered"
+have "$AEWORK/pm/newdep_findings.tsv" 'no remote-fetch-and-execute tokens' && ok "note explains why it is benign" || bad "benign note detail missing"
+[ ! -s "$AEWORK/pm/build_rs_excerpt.txt" ] && ok "no excerpt captured for a benign build script" || bad "excerpt captured for benign build script"
+# full pipeline negative: carrier 0.1.0 -> 0.3.0 adds pm2like -> tier none
+printf 'carrier\t0.1.0\t0.3.0\n' > "$AEWORK/neg.tsv"
+LOCKDIFF_TSV="$AEWORK/neg.tsv" WORK="$AEWORK/neg" REVIEWS="/nonexistent" \
+  RSA_CRATESIO_FIXTURE="$AEWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AEWORK/neg_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AEWORK/neg.log"
+have "$AEWORK/neg_out.txt" 'tier=none' && ok "benign new dependency -> overall tier none end to end" \
+  || bad "expected tier=none ($(grep '^tier=' "$AEWORK/neg_out.txt" 2>/dev/null))"
+# SUPPRESSION: signing off the DEPENDENCY (dlmacro) clears the critical finding.
+printf '[[review]]\ncrate = "dlmacro"\nversion = "1.0.0"\nreviewed_by = "carol"\n' > "$AEWORK/rev-dep.toml"
+printf 'carrier\t0.1.0\t0.2.0\n' > "$AEWORK/pos.tsv"
+LOCKDIFF_TSV="$AEWORK/pos.tsv" WORK="$AEWORK/sup" REVIEWS="$AEWORK/rev-dep.toml" \
+  RSA_CRATESIO_FIXTURE="$AEWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AEWORK/sup_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AEWORK/sup.log"
+have "$AEWORK/sup_out.txt" 'tier=none' && ok "signing off the dependency itself suppresses the finding (the ratchet)" \
+  || bad "dependency sign-off did not suppress ($(grep '^tier=' "$AEWORK/sup_out.txt" 2>/dev/null))"
+# NON-SUPPRESSION: signing off the AUDITED crate (carrier) must NOT hide its
+# dependency's build script — the arrayref sign-off never vouched for proc-macro1.
+printf '[[review]]\ncrate = "carrier"\nversion = "0.2.0"\nreviewed_by = "carol"\n' > "$AEWORK/rev-crate.toml"
+LOCKDIFF_TSV="$AEWORK/pos.tsv" WORK="$AEWORK/nosup" REVIEWS="$AEWORK/rev-crate.toml" \
+  RSA_CRATESIO_FIXTURE="$AEWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AEWORK/nosup_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AEWORK/nosup.log"
+have "$AEWORK/nosup_out.txt" 'tier=critical' && ok "signing off the audited crate does NOT hide its dependency's build script" \
+  || bad "audited-crate sign-off wrongly suppressed the dependency finding ($(grep '^tier=' "$AEWORK/nosup_out.txt" 2>/dev/null))"
+echo
+
+# ===========================================================================
+echo "### TEST AF — new-dep lane edge cases: offline, capping, unreadable"
+export RSA_FIXTURES="$FIX"
+AFWORK="$WORK/af"; mkdir -p "$AFWORK"
+# offline: no metadata -> downloader script degrades to medium, never silent
+RSA_CHECK_PROVENANCE=0 "$SCRIPTS/inspect_new_dep.sh" dlmacro 1.0.0 "$AFWORK/off" >/dev/null 2>"$AFWORK/off.log"
+awk -F'\t' '$1=="medium"&&$2=="new-dep-build-script"{f=1} END{exit !f}' "$AFWORK/off/newdep_findings.tsv" \
+  && ok "offline: downloader build script degrades to medium (age unknown)" || bad "offline dep not tiered medium"
+have "$AFWORK/off/newdep_findings.tsv" 'metadata is unavailable' && ok "offline detail says why age is unknown" || bad "offline reason missing"
+# missing source (path/git/workspace dep): logged skip, not a silent pass
+"$SCRIPTS/inspect_new_dep.sh" ghostdep 9.9.9 "$AFWORK/miss" >/dev/null 2>"$AFWORK/miss.log"
+have "$AFWORK/miss/newdep_findings.tsv" 'new-dep-not-inspected' && ok "no-source dependency is a logged skip, not a silent pass" || bad "no-source dep silently passed"
+have "$AFWORK/miss.log" 'no extracted source' && ok "the skip is logged with a reason" || bad "skip reason not logged"
+echo
+
+# ===========================================================================
+echo "### TEST AG — typosquat: a new near-miss of a crate already in the tree"
+# RustSec filed the 2026-08-20 incident as "via typosquatted proc-macro1", and
+# proc-macro2 was already in the victim's tree. pm2lke is one deletion from
+# pm2like and ships NO build script, so this proves the name+youth signal stands
+# on its own against a squat whose payload evades the build-script grep.
+export RSA_FIXTURES="$FIX"
+AGWORK="$WORK/ag"; mkdir -p "$AGWORK/cratesio" "$AGWORK/est"
+cp "$FIX/cratesio/pm2like.json" "$AGWORK/cratesio/"; cp "$FIX/cratesio/pm2like.json" "$AGWORK/est/"
+python3 - "$FIX/cratesio/pm2lke.json.template" "$AGWORK/cratesio/pm2lke.json" <<'PY'
+import sys
+from datetime import datetime, timedelta, timezone
+ts = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+open(sys.argv[2], "w").write(open(sys.argv[1]).read().replace("__CREATED_AT__", ts))
+PY
+# unit: the distance itself, and that a separator-only variant is NOT a squat
+# (crates.io normalizes - and _, so serde-json and serde_json cannot coexist)
+printf 'pm2like\ncarrier\nprobe_lib\n' > "$AGWORK/names.txt"
+SQ="$(python3 "$SCRIPTS/typosquat.py" pm2lke "$AGWORK/names.txt" 1)"
+[ "$SQ" = "$(printf '1\tpm2like')" ] && ok "typosquat.py: pm2lke is distance 1 from pm2like" || bad "wrong distance: '$SQ'"
+printf 'serde-json\n' > "$AGWORK/sep.txt"
+python3 "$SCRIPTS/typosquat.py" serde_json "$AGWORK/sep.txt" 1 >/dev/null 2>&1 \
+  && bad "separator-only variant treated as a squat (crates.io normalizes - and _)" \
+  || ok "separator-only variant is not a squat (crates.io cannot host both)"
+# full pipeline: young near-miss -> high, and it flips the recommendation
+printf 'carrier\t0.4.0\t0.5.0\n' > "$AGWORK/lockdiff.tsv"
+LOCKDIFF_TSV="$AGWORK/lockdiff.tsv" WORK="$AGWORK/run" REVIEWS="/nonexistent" \
+  RSA_CRATESIO_FIXTURE="$AGWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AGWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AGWORK/run.log"
+have "$AGWORK/out.txt" 'tier=high' && ok "brand-new near-miss with NO build script tiers HIGH" \
+  || bad "expected tier=high ($(grep '^tier=' "$AGWORK/out.txt" 2>/dev/null))"
+have "$AGWORK/out.txt" 'recommendation=review' && ok "typosquat flips the recommendation to review" || bad "expected recommendation=review"
+have "$AGWORK/run/comment_body.md" 'is 1 character from' && ok "comment names the crate it shadows" || bad "shadowed crate not named"
+have "$AGWORK/run/comment_body.md" 'one character from one you already depend on' \
+  && ok "headline names the typosquat as the reason" || bad "headline missing typosquat reason"
+# the false-positive guard: the SAME near-miss, but established (sha1/sha2 shape)
+python3 - "$FIX/cratesio/pm2lke.json.template" "$AGWORK/est/pm2lke.json" <<'PY'
+import sys
+s = open(sys.argv[1]).read().replace("__CREATED_AT__", "2015-03-01T00:00:00.000000Z")
+open(sys.argv[2], "w").write(s.replace('"downloads": 3', '"downloads": 483076553'))
+PY
+LOCKDIFF_TSV="$AGWORK/lockdiff.tsv" WORK="$AGWORK/est_run" REVIEWS="/nonexistent" \
+  RSA_CRATESIO_FIXTURE="$AGWORK/est" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AGWORK/est_out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AGWORK/est.log"
+have "$AGWORK/est_out.txt" 'tier=none' \
+  && ok "an ESTABLISHED near-miss is a note, not an alarm (the sha1/sha2 case)" \
+  || bad "established near-miss wrongly alarmed ($(grep '^tier=' "$AGWORK/est_out.txt" 2>/dev/null))"
+have "$AGWORK/est_run/crates/carrier/newdep.filtered" 'not flagged' \
+  && ok "the note explains why it was not flagged" || bad "no explanation in the note"
 echo
 
 # ===========================================================================

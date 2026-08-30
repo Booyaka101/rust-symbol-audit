@@ -11,9 +11,10 @@
 # ledger (.rust-symbol-audit/reviews.toml). The ledger suppresses ONLY capability
 # lanes; advisories/provenance are never hidden by a stale sign-off.
 #
-# Env: LOCKDIFF_TSV WORK MAX_CRATES FAIL_ON RSA_CONFIG REVIEWS PR_NUMBER PR_AUTHOR
-#      RSA_CHECK_PROVENANCE RSA_CHECK_ADVISORIES RSA_MIN_PUBLISH_AGE_HOURS
-#      GH_TOKEN RSA_DRY_RUN RSA_TARGET_DIR
+# Env: LOCKDIFF_TSV WORK MAX_CRATES MAX_NEW_DEPS FAIL_ON RSA_CONFIG REVIEWS
+#      PR_NUMBER PR_AUTHOR RSA_CHECK_PROVENANCE RSA_CHECK_ADVISORIES
+#      RSA_MIN_PUBLISH_AGE_HOURS RSA_TYPOSQUAT_DISTANCE GH_TOKEN RSA_DRY_RUN
+#      RSA_TARGET_DIR
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
@@ -22,6 +23,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCKDIFF_TSV="${LOCKDIFF_TSV:-/tmp/rsa/lockdiff.tsv}"
 WORK="${WORK:-/tmp/rsa}"
 MAX_CRATES="${MAX_CRATES:-10}"
+MAX_NEW_DEPS="${MAX_NEW_DEPS:-10}"
 FAIL_ON="${FAIL_ON:-none}"
 RSA_CONFIG="${RSA_CONFIG:-.rust-symbol-audit.toml}"
 REVIEWS="${REVIEWS:-.rust-symbol-audit/reviews.toml}"
@@ -30,6 +32,9 @@ mkdir -p "$WORK"
 # Every probe build in this audit shares one target dir (see build_crate.sh);
 # keeping it under WORK means it is scoped to the run and cleaned up with it.
 export RSA_TARGET_DIR="${RSA_TARGET_DIR:-$WORK/cargo-target}"
+# One crates.io-metadata cache for every new dependency inspected this run, so
+# a dep shared by several audited crates costs one fetch.
+export RSA_DEPMETA_CACHE="${RSA_DEPMETA_CACHE:-$WORK/depmeta}"
 SECTIONS="$WORK/sections.md"; : > "$SECTIONS"
 : > "$WORK/flagged.list"; : > "$WORK/clean.list"
 : > "$WORK/evidence.jsonl" 2>/dev/null || true
@@ -68,16 +73,6 @@ apply_allow() {
   if [ -z "$rx" ]; then cat "$f"; else grep -viE "$rx" "$f" || true; fi
 }
 
-max_tier() {
-  local f="$1" o="none" t
-  [ -f "$f" ] || { echo none; return; }
-  while IFS=$'\t' read -r t _rest; do
-    [ -n "$t" ] || continue
-    if [ "$(tier_rank "$t")" -gt "$(tier_rank "$o")" ]; then o="$t"; fi
-  done < "$f"
-  echo "$o"
-}
-
 md_cell() { printf '%s' "$1" | sed 's/|/\\|/g'; }
 
 # crate_headline — the single human reason a crate's tier is what it is, used for
@@ -99,15 +94,25 @@ crate_headline() {
   if awk -F'\t' '$1=="high"&&$2=="fresh-version"{f=1} END{exit !f}' "$PROV_TSV_F" 2>/dev/null; then
     printf 'was published %s, inside the fresh-version review window' \
       "$(cat "$CDIR/publish_age.txt" 2>/dev/null || printf 'very recently')"; return; fi
+  if awk -F'\t' '$1=="critical"&&$2=="new-dep-typosquat"{f=1} END{exit !f}' "$NEWDEP_TSV_F" 2>/dev/null; then
+    printf 'pulls in a brand-new near-miss of a crate you already depend on, whose build script downloads and executes a remote payload'; return; fi
+  if awk -F'\t' '$1=="critical"&&$2=="new-dep-build-script"{f=1} END{exit !f}' "$NEWDEP_TSV_F" 2>/dev/null; then
+    printf 'pulls in a new dependency whose build script downloads and executes a remote payload'; return; fi
+  if awk -F'\t' '$1=="high"&&$2=="new-dep-typosquat"{f=1} END{exit !f}' "$NEWDEP_TSV_F" 2>/dev/null; then
+    printf 'pulls in a brand-new dependency whose name is one character from one you already depend on'; return; fi
   if awk -F'\t' '$2=="build-script"{f=1} END{exit !f}' "$SRC_TSV_F" 2>/dev/null; then
     printf 'added or changed a build script that runs at compile time'; return; fi
   if awk -F'\t' '$2=="proc-macro"{f=1} END{exit !f}' "$SRC_TSV_F" 2>/dev/null; then
     printf 'became a proc-macro (runs code at compile time)'; return; fi
+  if awk -F'\t' '$2=="new-dep-proc-macro"{f=1} END{exit !f}' "$NEWDEP_TSV_F" 2>/dev/null; then
+    printf 'pulls in a new proc-macro dependency (runs code inside the compiler)'; return; fi
   case "$SYM_TIER" in
     critical) printf 'gained process-exec / raw-socket / syscall capability'; return;;
     high)     printf 'gained filesystem / env / secret-handling capability'; return;;
     medium)   printf 'gained higher-level network (http/tls/dns) capability'; return;;
   esac
+  if awk -F'\t' '$1=="medium"&&$2=="new-dep-build-script"{f=1} END{exit !f}' "$NEWDEP_TSV_F" 2>/dev/null; then
+    printf 'pulls in a new dependency whose build script references remote fetch and execution'; return; fi
   [ "$DEP_TIER" = "medium" ] && { printf 'pulled in new capability-bearing dependencies'; return; }
   printf 'changed its capability surface'
 }
@@ -160,20 +165,65 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   SRC_TSV_F="$CDIR/source_findings.filtered"
 
   DEP_TSV="$CDIR/dep_findings.tsv"; : > "$DEP_TSV"
+  NEWDEP_TSV="$CDIR/newdep_findings.tsv"; : > "$NEWDEP_TSV"
+  DEPCAPPED=""; DEPCAPPED_N=0
   OLD_LOCK="$CDIR/old/Cargo.lock"; NEW_LOCK="$CDIR/new/Cargo.lock"
   if [ -n "${oldv:-}" ] && [ -f "$OLD_LOCK" ] && [ -f "$NEW_LOCK" ]; then
-    pkg_set "$OLD_LOCK" | awk '{print $1}' | sort -u > "$CDIR/old_pkgs.txt"
-    pkg_set "$NEW_LOCK" | awk '{print $1}' | sort -u > "$CDIR/new_pkgs.txt"
-    comm -13 "$CDIR/old_pkgs.txt" "$CDIR/new_pkgs.txt" \
+    pkg_set "$OLD_LOCK" > "$CDIR/old_pkgs.txt"
+    pkg_set "$NEW_LOCK" > "$CDIR/new_pkgs.txt"
+    # Diff on names but keep the new lockfile's version per new dependency —
+    # inspect_new_dep.sh needs it to locate the extracted source (until 3.4.0
+    # the version was thrown away here and no new dependency was ever read).
+    comm -13 <(awk '{print $1}' "$CDIR/old_pkgs.txt" | sort -u) \
+             <(awk '{print $1}' "$CDIR/new_pkgs.txt" | sort -u) \
       | grep -vxE "probe_lib|$name" > "$CDIR/new_dep_names.txt" 2>/dev/null || true
-    while IFS= read -r dep; do
+    awk 'NR==FNR{want[$1]=1;next} want[$1]{print $1 "\t" $2}' \
+      "$CDIR/new_dep_names.txt" "$CDIR/new_pkgs.txt" > "$CDIR/new_deps.tsv"
+    # The names the OLD lockfile already resolved: what a typosquat would be
+    # shadowing. proc-macro2 was in the tree before proc-macro1 arrived.
+    awk '{print $1}' "$CDIR/old_pkgs.txt" | sort -u > "$CDIR/tree_names.txt"
+    DEPN=0
+    while IFS=$'\t' read -r dep depv; do
       [ -n "$dep" ] || continue
-      if printf '%s' "$dep" | grep -qiE "$CAP_CRATES"; then printf 'medium\t%s\n' "$dep"
-      else printf 'info\t%s\n' "$dep"; fi
-    done < "$CDIR/new_dep_names.txt" > "$DEP_TSV"
+      if printf '%s' "$dep" | grep -qiE "$CAP_CRATES"; then printf 'medium\t%s\n' "$dep" >> "$DEP_TSV"
+      else printf 'info\t%s\n' "$dep" >> "$DEP_TSV"; fi
+      DEPN=$((DEPN + 1))
+      if [ "$DEPN" -gt "$MAX_NEW_DEPS" ]; then
+        DEPCAPPED="${DEPCAPPED:+$DEPCAPPED, }\`$dep\`"; DEPCAPPED_N=$((DEPCAPPED_N + 1))
+        continue
+      fi
+      DEPDIR="$CDIR/newdeps/$dep-$depv"; mkdir -p "$DEPDIR"
+      # Passed per call rather than exported: the tree a dependency is judged
+      # against is this crate's old lockfile, and an exported value would
+      # outlive the iteration that computed it.
+      RSA_TREE_NAMES="$CDIR/tree_names.txt" \
+        "$HERE/inspect_new_dep.sh" "$dep" "$depv" "$DEPDIR" >/dev/null 2>>"$CDIR/build.log" || true
+      cat "$DEPDIR/newdep_findings.tsv" >> "$NEWDEP_TSV" 2>/dev/null || true
+    done < "$CDIR/new_deps.tsv"
+    if [ -n "$DEPCAPPED" ]; then
+      log "run_audit: $name pulls $DEPCAPPED_N new dep(s) over max-new-deps=$MAX_NEW_DEPS — NOT source-inspected: $DEPCAPPED"
+      printf 'none\tnew-dep-cap\t\t\t%s\n' \
+        "$DEPCAPPED_N new dependenc(ies) over \`max-new-deps\`=$MAX_NEW_DEPS were NOT source-inspected: $DEPCAPPED" >> "$NEWDEP_TSV"
+    fi
   fi
   apply_allow "$name" "$DEP_TSV" > "$CDIR/dep_findings.filtered" 2>/dev/null || true
   DEP_TSV_F="$CDIR/dep_findings.filtered"
+  # The new-dependency lane is suppressed only by a ledger sign-off of the
+  # DEPENDENCY itself (crate + version), never by the audited crate's sign-off:
+  # the arrayref sign-off names arrayref, and nobody reviewed proc-macro1.
+  # (An empty ledger must be a no-op: the two-file NR==FNR trick would otherwise
+  # consume the first finding as a review row, so guard on the ledger existing.)
+  if [ -s "$REVIEWS_NORM" ]; then
+    awk -F'\t' '
+      NR==FNR { if ($1=="REVIEW" && $4=="ALL") ok[$2 "\t" $3]=1; next }
+      !(($3 "\t" $4) in ok)' "$REVIEWS_NORM" "$NEWDEP_TSV" > "$NEWDEP_TSV.self" 2>/dev/null \
+      || cp "$NEWDEP_TSV" "$NEWDEP_TSV.self"
+  else
+    cp "$NEWDEP_TSV" "$NEWDEP_TSV.self"
+  fi
+  apply_allow "$name" "$NEWDEP_TSV.self" > "$CDIR/newdep.filtered" 2>/dev/null || true
+  NEWDEP_TSV_F="$CDIR/newdep.filtered"
+  NEWDEP_TIER="$(max_tier "$NEWDEP_TSV_F")"
 
   ADDED_COUNT=0
   RISK_TSV_F="$CDIR/risk.filtered"; : > "$RISK_TSV_F"
@@ -231,7 +281,7 @@ while IFS= read -r _line || [ -n "$_line" ]; do
 
   # crate tier ----------------------------------------------------------------
   CTIER="none"
-  for t in "$SYM_TIER" "$SRC_TIER" "$DEP_TIER" "$PROV_TIER" "$ADV_TIER"; do
+  for t in "$SYM_TIER" "$SRC_TIER" "$DEP_TIER" "$NEWDEP_TIER" "$PROV_TIER" "$ADV_TIER"; do
     [ "$(tier_rank "$t")" -gt "$(tier_rank "$CTIER")" ] && CTIER="$t"
   done
   if [ "$(tier_rank "$CTIER")" -gt "$(tier_rank "$OVERALL")" ]; then
@@ -311,6 +361,32 @@ while IFS= read -r _line || [ -n "$_line" ]; do
       [ -n "$capdeps" ] && printf ' 🟡 %s' "$capdeps"
       [ -n "$othdeps" ] && printf ' %s' "$othdeps"
       printf '\n\n'
+    fi
+    if [ -s "$NEWDEP_TSV_F" ]; then
+      printf '**New dependencies — source inspection:**\n\n'
+      while IFS=$'\t' read -r t _kind _d _v detail; do
+        [ -n "$t" ] || continue
+        printf '%s%s %s\n' '- ' "$(tier_emoji "$t")" "$detail"
+      done < "$NEWDEP_TSV_F"
+      printf '\n'
+      awk -F'\t' '$2=="new-dep-build-script" && ($1=="critical"||$1=="medium") {print $3 "\t" $4}' "$NEWDEP_TSV_F" \
+      | while IFS=$'\t' read -r d v; do
+          x="$CDIR/newdeps/$d-$v/build_rs_excerpt.txt"
+          if [ -s "$x" ]; then
+            printf '<details><summary>📄 show build script of `%s` %s</summary>\n\n```rust\n' "$d" "$v"
+            sed 's/```/`​``/g' "$x"
+            printf '\n```\n</details>\n\n'
+          fi
+        done
+      # A dependency's own sign-off (not the audited crate's) is what silences
+      # these findings, so offer that snippet for each flagged dependency.
+      awk -F'\t' '$1!="none" && $3!="" {print $3 "\t" $4}' "$NEWDEP_TSV_F" | sort -u \
+      | while IFS=$'\t' read -r d v; do
+          printf '<details><summary>✍️ Sign off dependency `%s` %s once reviewed</summary>\n\n' "$d" "$v"
+          printf 'Only a ledger entry for the dependency itself clears these — signing off `%s` does not:\n\n' "$name"
+          printf '```toml\n[[review]]\ncrate = "%s"\nversion = "%s"\nreviewed_by = "YOUR_NAME"\nnotes = ""\n```\n' "$d" "$v"
+          printf '</details>\n\n'
+        done
     fi
     if [ "$MATCH_COUNT" -gt 0 ]; then
       printf '**Added symbols (capability):**\n\n| risk | added symbol |\n|:--|:--|\n'

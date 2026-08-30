@@ -50,6 +50,9 @@ def crate_record(cdir):
                          for (t, k, d) in read_cols(os.path.join(cdir, "source_findings.filtered"), 3)],
         "dependencies": [{"tier": t, "name": n}
                          for (t, n) in read_cols(os.path.join(cdir, "dep_findings.filtered"), 2)],
+        "new_dependencies": [{"tier": t, "kind": k, "crate": d or None, "version": v or None,
+                              "detail": det}
+                             for (t, k, d, v, det) in read_cols(os.path.join(cdir, "newdep.filtered"), 5)],
         "symbols": [{"tier": t, "symbol": s}
                     for (t, s) in read_cols(os.path.join(cdir, "risk.filtered"), 2)],
     }
