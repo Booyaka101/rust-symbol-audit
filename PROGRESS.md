@@ -1,8 +1,19 @@
 # PROGRESS — rust-symbol-audit
 
-Status: **v3.4.0 — BUILT, LOCAL SUITE GREEN (126/126), NOT YET RELEASED.**
-Previous release v3.3.0 shipped 2026-08-20 (`2223e09`, `@v3`). This 3.4.0 work
-is uncommitted on `main`; the owner cuts the release from the phone.
+Status: **v3.4.0 — SHIPPED 2026-08-30.** PR #23 squash-merged to main as
+`b53fdc1`, all six checks green on that exact commit, tagged `v3.4.0` and
+released; `major-tag.yml` moved `v3` to the same commit, so consumers pinned at
+`@v3` are on 3.4.0. The Marketplace listing already serves v3.4.0 (an
+already-listed action picks up releases on its own, no TOTP step). Local suite:
+126 passed, 0 failed (baseline was 95).
+
+PR #24 followed as a test-only fix (`6ecb037`, green): TEST P embedded a path
+inside a `python3 -c` string, where Git Bash cannot rewrite it for native
+python, so the check failed whenever `WORK` sat outside the MSYS root. Found by
+running the suite from a fresh clone of the published tag rather than from the
+working copy. The tags deliberately stay at `b53fdc1`, since the shipped action
+code is byte-identical and a patch release for a test-only change is noise; it
+rides along in the next release.
 
 ## What v3.4.0 adds (the new-dependency source lane)
 
@@ -116,9 +127,9 @@ never vouched for proc-macro1).
 
 ## Next steps (owner)
 
-1. Nothing blocking. Commit on a branch, open a PR (this repo has real users, so
-   PR not direct push), let CI go green on the exact commit, then tag `v3.4.0`
-   and release; `major-tag.yml` moves `@v3`.
+1. Nothing blocking. The release is out and verified end to end: a fresh clone
+   of the published `v3.4.0` tag carries every new script with the right exec
+   bit, and its suite runs green.
 2. ⚠️ **Announce the verdict change loudly.** A PR that passed under 3.3.0 can
    now fail for a *transitive dependency* the bump introduced: a
    download-and-execute build script, or a brand-new name one edit from a crate
