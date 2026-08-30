@@ -1,8 +1,11 @@
 # PROGRESS — rust-symbol-audit
 
-Status: **v3.5.0 — BUILT, LOCAL SUITE GREEN (136/136), NOT YET RELEASED.**
-Closes the gaps 3.4.0 left open. Three were real and are now fixed; the fourth
-turned out never to have existed, which is recorded rather than quietly dropped.
+Status: **v3.5.0 — SHIPPED 2026-08-30.** PR #26 squash-merged to main as
+`bd5a13e`, all six checks green on that exact commit, tagged `v3.5.0` and
+released; `v3` moved with it. A fresh clone of the published tag runs
+**136/136 green**, including with `WORK` outside the MSYS root. Closes the gaps
+3.4.0 left open: three were real and are fixed, and the fourth turned out never
+to have existed, which is recorded rather than quietly dropped.
 
 ## What v3.5.0 adds
 
