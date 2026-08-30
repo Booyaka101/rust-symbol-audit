@@ -4,6 +4,136 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] — 2026-08-30
+
+The dependency lane now reads the source of every crate a bump newly pulls in,
+instead of classifying it by name alone. Built against the same
+[2026-08-20 supply chain attack on arrayref](https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/):
+the malicious `arrayref` 0.3.10 kept its original macro source byte for byte and
+added a single manifest line, `proc-macro1 = "1.0.107"`. The whole payload lived
+in that new dependency's build script, which downloaded and executed a remote
+binary at compile time. arrayref 0.3.10, internment 0.8.7 and append-only-vec
+0.1.9 were live for 86, 90 and 107 minutes and then deleted from crates.io.
+RustSec closed the report (advisory-db#3161) as not planned, so cargo-audit has
+nothing to fire on.
+
+On that bump the symbol lane sees no added symbols (arrayref's own code did not
+change), the compile-time lane sees no build script on arrayref, and until this
+release the dependency lane printed `info proc-macro1` from a fixed 34-name grep
+that never read the new crate's source. Three crates deep in almost every GUI
+tree, and every lane was blind to it.
+
+⚠️ **This changes verdicts.** A PR whose bump pulls in a new dependency with a
+download-and-execute build script now tiers `critical` (young or barely
+downloaded crate) or `medium` (established, widely used), so it will newly fail
+`fail-on: medium`/`high`/`critical` and flip `recommendation` from `auto-merge`
+to `review`. A PR that passed clean under 3.3.0 can fail under 3.4.0 for a
+transitive dependency the bump introduced. A new proc-macro dependency stays
+`high` and a new `links =` dependency stays `medium`, the tiers the compile-time
+lane already assigns.
+
+### Added
+
+- **New-dependency source inspection.** For each crate a bump newly resolves
+  into the tree (versions are now carried through the lockfile diff, not thrown
+  away), the crate's extracted source is inspected: a `build.rs` (including a
+  custom `build = "..."` path), a switch to `proc-macro = true`, a `links =`
+  native lib, plus the crate's `created_at` and total downloads from crates.io
+  (through the provenance lane's existing path, cached once per run, capped, and
+  degrading to "unknown" offline exactly as provenance already does).
+- **Tiering on the combination, not the build script alone.** A build script
+  that references both remote fetch and execution is `critical` when the crate
+  is young or barely downloaded (the proc-macro1 shape), `medium` when the crate
+  is established and widely downloaded (more likely vendored build tooling), and
+  a plain note when it has neither tell. The `critical`/`medium` cases render the
+  build-script excerpt inline, the way the audited crate's build-script diff
+  already does. Offline, a download-and-execute script with unknown age degrades
+  to `medium` rather than being silently cleared.
+- **A dependency's own sign-off suppresses these; the audited crate's does not.**
+  Signing off `proc-macro1 1.0.107` in the ledger clears the finding for that
+  exact version, the same ratchet the capability lanes use. Signing off the crate
+  that pulled it in (arrayref) does not hide its dependency's build script, since
+  nobody reviewed proc-macro1. The suite asserts both directions.
+- **`max-new-deps` input** (default `10`), which source-inspects at most this many new
+  dependencies per audited crate. Any beyond the cap are named in the comment as
+  not inspected, never silently skipped (house no-silent-caps rule).
+- **Typosquat detection.** RustSec filed this incident as "Malware: `arrayref`
+  0.3.10 executes a remote payload at build time via typosquatted
+  `proc-macro1`", and `proc-macro2` was already sitting in every victim's tree.
+  A newly-pulled crate whose name is within one edit of a crate the *old*
+  lockfile already resolved, and which is itself young or barely downloaded,
+  now tiers `high`, or `critical` when it also carries a download-and-execute
+  build script. This fires on the name alone, so it catches a squat whose
+  payload is hidden well enough to evade the build-script check. Needs no
+  network beyond the metadata already fetched and no bundled list of popular
+  crates: the crate being shadowed is one you already depend on. Tunable with
+  the new `typosquat-distance` input (`0` disables it).
+- New fixtures reconstructing the 2026-08-20 shape (an audited crate whose lib
+  source is byte-identical across the bump, one added dependency with a
+  downloader build script), a negative fixture modelled on a real established
+  build-script crate (rustc feature-probing, no remote fetch), and a typosquat
+  fixture that ships **no** build script so the name signal is tested on its
+  own. Local suite grown to **126 checks** (was 95).
+
+### Measured before shipping
+
+The gate was run across the resolved trees of 19 popular crates (tokio, serde,
+reqwest, hyper, clap, syn, ring, rustls, git2, rusqlite, image, prost and their
+transitive dependencies): **1810 unique crate versions, 224 with a build
+script**. A first cut that treated any `http(s)://` as a fetch fired on **61**
+of the most-downloaded crates in the ecosystem (serde, proc-macro2, quote,
+thiserror, libc, anyhow, zerocopy, rustversion, paste), every one a URL sitting
+in a comment or an error string, never a real download. The rule was wrong, so
+it was re-gated: fetch now means a network client or download tool is actually
+invoked (reqwest/ureq/curl/wget/raw sockets), and comments are stripped before
+matching. Re-measured, the download-and-execute rule fires on **0 of 1810**
+crates while still catching the curl-based payload fixture. Measured
+false-positive rate on this corpus: **0%**.
+
+The typosquat rule got the same treatment and it changed the design. Those 1810
+versions carry 1155 distinct names, which yield **21 pairs within one edit, and
+every single pair is two legitimate crates**: `sha1`/`sha2`, `libc`/`libm`,
+`mime`/`time`, `hyper`/`hypher`, `bit-vec`/`bitvec`, `wasi`/`wasmi` and so on. A
+rule that alarmed on name proximity would fire in nearly every Rust project on
+earth, so name distance is not the signal. The signal is the asymmetry the real
+attack had: `proc-macro1` was new with no downloads, `proc-macro2` had years and
+billions. Requiring the newcomer to be young or barely downloaded takes those 21
+pairs to **0**, with room to spare: checked against crates.io the youngest of
+the 39 crates involved is 509 days old and the least downloaded has 369,664
+downloads, against gates of 30 days and 10,000. Both measurements are
+reproducible with `test/corpus_scan.py` and written up in `test/CORPUS.md`.
+
+### Fixed
+
+- **`advisories.sh` died halfway through on Windows and never wrote
+  `advisories.json`.** The lane emits advisory prose containing an em dash, and
+  the second of its two python blocks decodes and re-encodes that text; without
+  `PYTHONUTF8=1` a Windows interpreter falls back to cp1252 and raises
+  `UnicodeEncodeError`, so the script exited 1 with the JSON missing and the
+  detail string mangled to a replacement character. 3.3.0 fixed exactly this in
+  `provenance.sh` and `advisories.sh` was missed. It survived three releases
+  because the test asserted only on `advisory_findings.tsv`, which the *first*
+  block writes, so the half-run was invisible. The suite now asserts the exit
+  code, the JSON, and the absence of replacement characters. Linux runners were
+  never affected, so no released audit result was wrong; the local lane output
+  was.
+
+### Changed
+
+- The build-script / proc-macro / links inspection that `inspect_source.sh` ran
+  only for the audited crate is now one shared function (`inspect_crate_dir` in
+  `lib.sh`), called from both the audited-crate path and the new-dependency
+  path, rather than a second copy. A bump that pulls in no new dependencies
+  produces byte-identical output to 3.3.0 (verified by diffing the rendered
+  comment over a real no-new-deps bump across both versions).
+- The tier-folding loop that every lane script carried its own copy of is now
+  `max_tier` in `lib.sh`, with the five copies (four lane scripts plus
+  `run_audit.sh`'s private duplicate) reduced to one. Proved behaviour-neutral
+  by recording each lane's real output across fifteen branches (every tier,
+  empty findings, missing source, offline, registry-removed) before and after,
+  and diffing byte for byte: thirteen identical, and the two that moved are the
+  advisories fix above and a fixture timestamp.
+
 ## [3.3.0] — 2026-08-20
 
 The provenance lane now reads publish age and notices a version the registry has

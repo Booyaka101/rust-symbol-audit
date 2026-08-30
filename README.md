@@ -17,6 +17,26 @@ attack](https://blog.rust-lang.org/2026/08/20/supply-chain-attack-on-arrayref/).
 minutes old when this ran, so the finding says *young*, not *malicious*. That
 distinction is the point: it tells you what it actually knows.</sub>
 
+![The PR comment for a bump that pulls in a new dependency. Headline verdict CRITICAL, recommendation review. The finding reads: new dependency dlmacro 1.0.0, crate first published 54 minutes ago, 0 total downloads, ships a build script that downloads and executes a remote payload. The build script is shown inline, decoding a base64 host, curling a payload and executing it. Below it is a copy-paste sign-off snippet for the dependency itself.](images/new-dependency-finding.png)
+
+<sub>The lane added in 3.4.0, on the shape of the 2026-08-20 attack: the audited
+crate's own source is byte-identical across the bump and it adds one dependency
+whose build script downloads and runs a payload. This is a **reconstruction**
+run through the real pipeline, not a live fetch: `arrayref 0.3.10` and
+`proc-macro1 1.0.107` were deleted from crates.io within 107 minutes, so nobody
+can resolve them any more. The tiering is what the tool actually computes from
+the crate's age, its download count, and its build script.</sub>
+
+![The PR comment for a typosquatted dependency. Headline verdict HIGH, recommendation review. The finding reads: new dependency pm2lke 1.0.0, crate first published 6 hours ago, 3 total downloads, is 1 character from pm2like, which your tree already depends on.](images/typosquat-finding.png)
+
+<sub>The typosquat check, on a dependency that ships **no build script at all**.
+The name is one character from a crate the tree already depended on and the
+newcomer is hours old with three downloads, which is the asymmetry
+`proc-macro1` had beside `proc-macro2`. Measured over 1155 real crate names,
+every one of the 21 distance-1 pairs was a legitimate pair like `sha1`/`sha2`,
+so the age and adoption gate is what makes this rule usable rather than the
+name distance.</sub>
+
 > **See it in action →** a live demo PR where it catches a real advisory and folds
 > away the clean bump: **[rust-symbol-audit-demo #1](https://github.com/Booyaka101/rust-symbol-audit-demo/pull/1)**. On PRs that change `Cargo.lock`, for every
 crate whose version changed it runs five checks, merges them into one **sticky PR
@@ -36,8 +56,21 @@ publishes it, or ship a known vuln?*
    **`proc-macro = true`**, or a new **`links =`** native lib. Code that runs *on
    your build machine at compile time* — and the comment shows the **actual
    build-script diff**, not just "it changed". Symbol-diffing is blind to this.
-3. **Dependency tree** — crates the bump **newly pulls into your build**,
-   highlighting ones with known network / process / crypto / FFI capability.
+3. **Dependency tree** — crates the bump **newly pulls into your build**, and for
+   each one it reads the crate's **actual source**: a **`build.rs`** that both
+   fetches something remote *and* executes it, a switch to **`proc-macro = true`**,
+   a **`links =`** native lib, plus the crate's **age and download count** from
+   crates.io. A downloader build script in a **young or barely-downloaded** crate
+   is `critical` with the excerpt shown inline; the same script in an
+   established, widely-used crate is `medium`; a build script with neither tell
+   (the shape `proc-macro2`, `libc` and `serde` all have) is a plain note. This
+   is the lane that catches the **2026-08-20 arrayref attack**, where the bumped
+   crate was byte-identical and the payload lived entirely in a newly-added
+   dependency's build script. It also flags a **typosquat**: a brand-new,
+   barely-downloaded crate whose name is one character from one your tree
+   *already* depends on, which is how `proc-macro1` rode in beside
+   `proc-macro2`. That fires on the name alone, so it still catches a squat
+   whose payload is hidden too well for the build-script check.
 4. **Provenance** *(network)* — via the crates.io API: a version **published by a
    different account** than before, a crate with **no source repository**, a
    **yanked** version, a version **crates.io no longer lists** (deleted from the
@@ -143,6 +176,8 @@ the `recommendation` output).
 |---|---|---|
 | `github-token` | — | Usually `secrets.GITHUB_TOKEN`. Posts/updates the comment. |
 | `max-crates` | `10` | Audit at most this many changed crates; the rest are listed as "not audited". |
+| `max-new-deps` | `10` | Source-inspect at most this many crates newly pulled into the tree per audited crate (build.rs / proc-macro / links + crates.io age and downloads). Any beyond the cap are listed as not inspected, never silently skipped. |
+| `typosquat-distance` | `1` | Flag a newly-pulled crate whose name is within this many edits of one already in your tree, *and* which is itself young or barely downloaded. `0` disables it. Raising it above `1` is not recommended: distance-2 covers many legitimate pairs. |
 | `fail-on` | `none` | Fail the check at `medium`/`high`/`critical`. `none` = advisory only. |
 | `config` | `.rust-symbol-audit.toml` | Allow/ignore rules to suppress known-benign signals. |
 | `reviews` | `.rust-symbol-audit/reviews.toml` | The review ledger (the ratchet). |
@@ -193,7 +228,7 @@ lister (GNU `nm`, or `rustup component add llvm-tools` → `llvm-nm`, auto-detec
 on Windows). In **Git Bash**:
 
 ```bash
-bash test/run_local.sh      # -> RESULT: 95 passed, 0 failed / ALL GREEN
+bash test/run_local.sh      # -> RESULT: 126 passed, 0 failed / ALL GREEN
 ```
 
 Exercises all five lanes, the ledger ratchet, config suppression, gating, the
@@ -205,10 +240,33 @@ mock crates.io / OSV responses (plus one real crates.io bump). See
 
 **Catches well:** a crate that starts directly calling `std::net`/`process`/`fs`;
 a new or changed **build script** / **proc-macro** (even when the crate won't
-build as a lib); a **native lib** newly linked; **new crates** in the tree; a
+build as a lib); a **native lib** newly linked; **new crates** in the tree, each
+with its **build script read** (a download-and-execute `build.rs` in a young or
+barely-downloaded crate is the arrayref/proc-macro1 shape); a
 **publisher/repo/yank** change; a version **younger than the review window** or
 **deleted from crates.io** (the arrayref-incident shapes); a **known advisory**
 on the new version.
+
+**Measured false-positive rate (typosquat).** Across the same corpus, **1155
+crate names produced 21 distance-1 pairs, and every one is a pair of legitimate
+crates** (`sha1`/`sha2`, `libc`/`libm`, `mime`/`time`, `hyper`/`hypher`…). Name
+proximity alone would therefore fire in nearly every Rust project, so it is not
+the signal. The rule additionally requires the newcomer to be young or barely
+downloaded, which is the asymmetry the real attack had: checked against
+crates.io, the youngest of those 39 crates is 509 days old and the least
+downloaded has 369,664 downloads, so **none of them trips the gate**. An
+established near-miss still renders as a note naming what it resembles.
+
+**Measured false-positive rate.** The new-dependency build-script rule was run
+over the resolved trees of 19 popular crates — **1810 unique crate versions, 224
+with a build script** — and fired on **0** of them, while catching the
+curl-based payload fixture. The gate requires a build script to *both* invoke a
+network client (reqwest/ureq/curl/wget/raw sockets) *and* execute something, with
+comments stripped first; a naive "any `http(s)://`" rule fired on 61 of those
+crates (serde, proc-macro2, quote, thiserror, libc, anyhow…), every one a URL in
+a comment or error string, which is why it was re-gated. `proc-macro2`, `libc`
+and `serde` all shell out to rustc from `build.rs`; that is execution without a
+fetch, and it is correctly a note, not an alarm.
 
 **Misses / limits (inherent to static analysis):** capability via generics never
 instantiated in the crate's own rlib, or via an unchanged dependency; runtime

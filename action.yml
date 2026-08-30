@@ -13,6 +13,14 @@ inputs:
     description: "Audit at most this many changed crates (the rest are listed as 'not audited'). Symbol-diffing every crate is slow."
     required: false
     default: "10"
+  max-new-deps:
+    description: "Source-inspect at most this many dependencies newly pulled into the tree per audited crate (build script / proc-macro / links + crates.io age and downloads). The rest are listed as not inspected."
+    required: false
+    default: "10"
+  typosquat-distance:
+    description: "Flag a newly-pulled crate whose name is within this many edits of one already in your tree, when the newcomer is also young or barely downloaded. '0' disables the check."
+    required: false
+    default: "1"
   fail-on:
     description: "Fail the check when the overall risk tier reaches this level: none|medium|high|critical. Default 'none' = advisory comment only. Set e.g. 'critical' to block merges via branch protection."
     required: false
@@ -123,6 +131,8 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         MAX_CRATES: ${{ inputs.max-crates }}
+        MAX_NEW_DEPS: ${{ inputs.max-new-deps }}
+        RSA_TYPOSQUAT_DISTANCE: ${{ inputs.typosquat-distance }}
         FAIL_ON: ${{ inputs.fail-on }}
         RSA_CONFIG: ${{ inputs.config }}
         REVIEWS: ${{ inputs.reviews }}

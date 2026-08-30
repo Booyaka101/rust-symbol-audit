@@ -1,0 +1,11 @@
+[package]
+name = "carrier"
+version = "0.5.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+pm2like = { path = "../pm2like-1.0.0" }
+pm2lke = { path = "../pm2lke-1.0.0" }

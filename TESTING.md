@@ -24,7 +24,7 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 95 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 126 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |
@@ -48,6 +48,14 @@ Expected result: **`RESULT: 95 passed, 0 failed` / `ALL GREEN`**.
 | Q | The comment shows the **actual build.rs code** (not just "it changed") in a `<details>` block | new |
 | R | `read_reviews.py` normalizes whole-version (`ALL`) vs per-capability (`ACCEPT`) sign-offs | new |
 | Y | A crate whose old version carries **zero v0 symbols** (`facade` 0.1.0, the `thiserror` shape) still gets diffed, so a bump that gains `TcpStream` + `Command` tiers **critical** instead of coming back clean | #14 |
+| Z | `fresh-version`: a version published 41 minutes ago tiers **high**, renders its age inline, flips the recommendation to review, and is not hidden by a sign-off; `min-publish-age-hours=0` restores the old tier and keeps the note | 3.3.0 |
+| AA | A years-old version gets a **none**-tier age note and nothing else | 3.3.0 |
+| AB | `version-not-on-registry`: a version crates.io no longer lists tiers **high** (the `arrayref 0.3.10` shape), including for newly-added crates, and survives a sign-off | 3.3.0 |
+| AC | The offline / disabled provenance path emits exactly the `provenance-unknown` note, byte-identical, and manufactures no publish age | 3.3.0 |
+| AD | **The 2026-08-20 arrayref shape**: an audited crate whose lib source is byte-identical across the bump, adding one dependency whose `build.rs` downloads and executes a payload, tiers **critical** end to end, renders the excerpt inline, and offers the dependency sign-off snippet | 3.4.0 |
+| AE | A new dependency whose `build.rs` only shells out to rustc (the `proc-macro2`/`serde`/`libc` shape) stays a **none**-tier note; signing off the **dependency** suppresses the finding, signing off the **audited crate** does not | 3.4.0 |
+| AF | New-dep edge cases: offline degrades a downloader script to **medium** rather than clearing it, and a dependency with no extracted source (path/git/workspace member) is a **logged skip**, never a silent pass | 3.4.0 |
+| AG | **Typosquat**: a brand-new, barely-downloaded crate one edit from one already in the tree (`pm2lke` beside `pm2like`) tiers **high** with **no build script at all**, naming the crate it shadows; the same near-miss when **established** is a note, not an alarm (the `sha1`/`sha2` case); a separator-only variant is never a squat, since crates.io cannot host both | 3.4.0 |
 
 `test/fixtures/netcap-0.1.0` (pure compute) vs `netcap-0.2.0` (adds
 `TcpStream::connect` + `Command::spawn`) is the "real version bump that gains

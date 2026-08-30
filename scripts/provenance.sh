@@ -61,9 +61,10 @@ if [ "$got" -ne 1 ]; then
   cat "$JSON"; exit 0
 fi
 
-OLDV="$OLDV" NEWV="$NEWV" OUTDIR="$OUTDIR" python3 - "$RAW" >> "$TSV" <<'PY'
+OLDV="$OLDV" NEWV="$NEWV" OUTDIR="$OUTDIR" PYTHONPATH="$HERE" python3 - "$RAW" >> "$TSV" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
+from agefmt import rel_age
 oldv = os.environ.get("OLDV", "")
 newv = os.environ.get("NEWV", "")
 outdir = os.environ.get("OUTDIR", ".")
@@ -85,18 +86,6 @@ for v in versions:
 def pub(v):
     pb = (v or {}).get("published_by") or {}
     return pb.get("login") or pb.get("name")
-
-def rel_age(secs):
-    m = int(secs // 60)
-    if m < 120:
-        return "%d minute%s ago" % (m, "" if m == 1 else "s")
-    h = int(secs // 3600)
-    if h < 48:
-        return "%d hours ago" % h
-    d = int(secs // 86400)
-    if d < 730:
-        return "%d days ago" % d
-    return "%d years ago" % (d // 365)
 
 nv = by_num.get(str(newv))
 ov = by_num.get(str(oldv)) if oldv else None
@@ -165,11 +154,7 @@ for tier, kind, detail in out:
 PY
 
 # --- overall tier + json ---
-overall="none"
-while IFS=$'\t' read -r t _rest; do
-  [ -n "$t" ] || continue
-  if [ "$(tier_rank "$t")" -gt "$(tier_rank "$overall")" ]; then overall="$t"; fi
-done < "$TSV"
+overall="$(max_tier "$TSV")"
 
 OVERALL="$overall" python3 - "$TSV" > "$JSON" <<'PY'
 import json, os, sys
