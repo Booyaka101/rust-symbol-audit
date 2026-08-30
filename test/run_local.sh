@@ -344,7 +344,13 @@ echo
 # ===========================================================================
 echo "### TEST P — machine-readable evidence report (audit-report.json)"
 have "$OWORK/r/audit-report.json" 'rust-symbol-audit' && ok "evidence report produced" || bad "no evidence report"
-python3 -c "import json; d=json.load(open('$OWORK/r/audit-report.json')); assert d['schema']==1 and d['overall_tier']=='critical' and d['crates'] and d['crates'][0]['symbols']" 2>/dev/null \
+# Pass the path as an ARGUMENT, never embedded in the -c source. Under Git Bash
+# a POSIX path given as an argument is rewritten to a Windows one for native
+# python, but one sitting inside the code string is not, so it arrives as
+# "/d/tmp/..." and open() fails. That made this check fail only when WORK was
+# outside the MSYS root, which is exactly what a clean clone elsewhere does.
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['schema']==1 and d['overall_tier']=='critical' and d['crates'] and d['crates'][0]['symbols']" \
+  "$OWORK/r/audit-report.json" 2>/dev/null \
   && ok "evidence JSON well-formed (critical verdict + per-crate symbols)" || bad "evidence JSON malformed/unexpected"
 echo
 
