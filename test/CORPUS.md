@@ -93,6 +93,39 @@ margin on both axes. Measured false positives: **0 of 21 pairs**. An established
 near-miss still renders as a `none`-tier note naming the crate it resembles, so
 the information is never silently dropped.
 
+## The audited-crate alarm (3.5.0)
+
+`SRC_ALARM` decides whether a newly-added or changed `build.rs` on the audited
+crate is `high` or `critical`. It was a raw grep, so a comment counted. Over the
+same 224 build scripts:
+
+```
+SRC_ALARM matched raw            : 122
+SRC_ALARM after comment-stripping:  99
+matched ONLY through a comment   :  23
+```
+
+Those 23 are the entire `icu_*_data` family, `portable-atomic` and `radium`,
+every one of them matching on a URL in a comment such as a link to a rust-lang
+issue. They were being escalated to `critical` for documentation. The alarm now
+reads code with comments stripped, so they land at `high`, which is still
+flagged, just not as an implant.
+
+## No source repository (3.5.0)
+
+Sampled 120 real crate names at random from the corpus and asked crates.io
+whether each declares a repository:
+
+```
+sampled           : 120   (120 resolved, 0 errors)
+no repository     :   1   (serde_regex, 46,372,639 downloads)
+```
+
+So a missing repository is a genuinely rare tell, roughly 1%, but it does happen
+to legitimate crates and the one that has it is enormous. Same gate as
+everything else here: unattributable *and* new or unadopted alarms,
+unattributable but established is a note. On this sample that is 0 alarms.
+
 ## Why the first cut was wrong
 
 A first version treated any `http[s]?://` in a build script as a fetch. On this

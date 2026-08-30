@@ -11,7 +11,7 @@ NM="${NM:-nm}"
 RUSTFILT="${RUSTFILT:-rustfilt}"
 
 # Directory this library lives in, so helpers can find sibling scripts
-# (fetch_exec.py) regardless of which script sourced lib.sh.
+# (code_scan.py, typosquat.py) regardless of which script sourced lib.sh.
 RSA_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() { printf '[rust-symbol-audit] %s\n' "$*" >&2; }
@@ -135,7 +135,7 @@ SRC_ALARM='process::command|command::new|::exec|tcpstream|udpsocket|std::net|req
 # (serde, proc-macro2, quote, thiserror, libc, anyhow, zerocopy...) because they
 # carry blog/issue/license URLs in comments and error strings. Requiring a real
 # client (reqwest/ureq/curl/wget/raw sockets) and stripping comments first (see
-# fetch_exec.py) takes that to 0 while still catching the curl-based payload.
+# code_scan.py) takes that to 0 while still catching the curl-based payload.
 SRC_FETCH='reqwest|ureq|isahc|attohttpc|minreq|\bhyper\b|\bcurl\b|\bwget\b|tcpstream|udpsocket|std::net'
 SRC_EXEC='process::command|command::new|::exec|::spawn|/bin/sh|/bin/bash|powershell|cmd\.exe'
 
@@ -160,8 +160,8 @@ build_rs_path() {
 # (no old side), as key<TAB>value lines on stdout:
 #   build_script <path>      the build script, if any (incl. custom `build =`)
 #   readable     0|1         could the build script actually be read
-#   alarm        0|1         build script matches SRC_ALARM
-#   fetch_exec   0|1         build script matches SRC_FETCH AND SRC_EXEC
+#   alarm        0|1         build script CODE matches SRC_ALARM (comments stripped)
+#   fetch_exec   0|1         build script CODE matches SRC_FETCH AND SRC_EXEC
 #   proc_macro   0|1         Cargo.toml declares proc-macro = true
 #   links        <lib>       Cargo.toml declares links = "<lib>"
 # Emits nothing for a missing dir. Both the audited-crate diff and the
@@ -174,15 +174,14 @@ inspect_crate_dir() {
     printf 'build_script\t%s\n' "$bs"
     if [ -r "$bs" ] && grep -q '' "$bs" 2>/dev/null; then
       printf 'readable\t1\n'
-      # alarm keeps its raw-grep semantics (the audited-crate lane's tiering is
-      # unchanged); fetch_exec strips comments first so a URL in a comment or an
-      # error string does not read as a fetch. See fetch_exec.py.
-      printf 'alarm\t%s\n' "$(grep -qiE "$SRC_ALARM" "$bs" 2>/dev/null && echo 1 || echo 0)"
-      if SRC_FETCH="$SRC_FETCH" SRC_EXEC="$SRC_EXEC" python3 "$RSA_LIB_DIR/fetch_exec.py" "$bs" 2>/dev/null; then
-        printf 'fetch_exec\t1\n'
-      else
-        printf 'fetch_exec\t0\n'
-      fi
+      # Both facts come from one pass over the script's real code, comments
+      # stripped. Measured: 23 of 224 real build scripts matched SRC_ALARM only
+      # through a URL in a comment (every icu_*_data crate, portable-atomic,
+      # radium), which used to escalate an added build script to critical for no
+      # reason. See code_scan.py.
+      SRC_ALARM="$SRC_ALARM" SRC_FETCH="$SRC_FETCH" SRC_EXEC="$SRC_EXEC" \
+        python3 "$RSA_LIB_DIR/code_scan.py" "$bs" 2>/dev/null \
+        || printf 'alarm\t0\nfetch_exec\t0\n'
     else
       printf 'readable\t0\nalarm\t0\nfetch_exec\t0\n'
     fi

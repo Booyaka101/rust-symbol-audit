@@ -1,6 +1,39 @@
 # PROGRESS — rust-symbol-audit
 
-Status: **v3.4.0 — SHIPPED 2026-08-30.** PR #23 squash-merged to main as
+Status: **v3.5.0 — BUILT, LOCAL SUITE GREEN (136/136), NOT YET RELEASED.**
+Closes the gaps 3.4.0 left open. Three were real and are now fixed; the fourth
+turned out never to have existed, which is recorded rather than quietly dropped.
+
+## What v3.5.0 adds
+
+1. **A newly-added crate gets a dependency lane.** It was gated on the crate
+   having an old version to diff, so a brand-new direct dependency that itself
+   pulled a downloader produced nothing. It now falls back to the repo's pre-PR
+   lockfile (`base_pkgs.tsv`, written by `parse_lockdiff.sh`) as the reference
+   for what counts as new; a dependency the repo already had is not re-reported.
+2. **`no-source-repo` for new dependencies**, with the same young/low-adoption
+   gate. Measured: 1 of 120 random real crates lacks a repository
+   (`serde_regex`, 46M downloads), so gated it alarms on none of them.
+3. **The compile-time alarm reads code, not comments.** `SRC_ALARM` was a raw
+   grep, so a URL in a comment escalated an added `build.rs` to `critical`.
+   Measured over 224 real build scripts: 122 matched raw, 99 with comments
+   stripped, **23 matched only through a comment** (the whole `icu_*_data`
+   family, `portable-atomic`, `radium`). ⚠️ This lowers those to `high`, so a
+   repo on `fail-on: critical` may newly pass. A genuine shell-out is still
+   `critical`, asserted.
+4. **The version-changed-dependency "gap" was not real.** `parse_lockdiff.sh`
+   diffs the whole lockfile, so such a dependency already becomes its own
+   audited row and `inspect_source.sh` already catches an added or changed build
+   script there. Verified against the fixtures before writing any code. Nothing
+   was built; the 3.4.0 write-up was the defect.
+
+Also fixed on the way: `code_scan.py` forced to LF output. Windows python was
+translating to CRLF, putting a stray carriage return into every fact value,
+which survived only because Git Bash's awk tolerates it.
+
+---
+
+Previous release: **v3.4.0 — SHIPPED 2026-08-30.** PR #23 squash-merged to main as
 `b53fdc1`, all six checks green on that exact commit, tagged `v3.4.0` and
 released; `major-tag.yml` moved `v3` to the same commit, so consumers pinned at
 `@v3` are on 3.4.0. The Marketplace listing already serves v3.4.0 (an
@@ -63,7 +96,7 @@ never vouched for proc-macro1).
   planned, SafeDep line-level teardown (0.3.10 keeps macro source + one manifest
   line), crates.io API (arrayref tops out at 0.3.9, 251M downloads; cargo-audit
   0.22.2, 11.1M downloads). No cost barrier. LESSONS.md read; no contradiction.
-- **Local suite: 126 passed / 0 failed** (was 95). New tests AD (arrayref shape
+- **Local suite: 136 passed / 0 failed** (was 95). New tests AD (arrayref shape
   → critical end to end, excerpt + dep sign-off snippet), AE (benign
   rustc-probing build.rs → none; dependency sign-off suppresses; audited-crate
   sign-off does NOT), AF (offline → medium, no-source dep → logged skip), AG
@@ -141,20 +174,31 @@ never vouched for proc-macro1).
    character from something you already trust; cargo-audit had no advisory to
    fire on) is the one to lead with.
 
-## Known gaps, deliberately not built
+## The four gaps: three closed in 3.5.0, one was never real
 
-Written up so they are not rediscovered from scratch. None change existing
-verdicts; each needs its own measurement before shipping.
+1. ~~A dependency whose **version** changed is never inspected.~~ **This claim
+   was wrong.** `parse_lockdiff.sh` diffs the *whole* lockfile, so a transitive
+   dep moving 1.0.106 → 1.0.107 already becomes its own audited row and
+   `inspect_source.sh` catches an added or changed build script at `critical`.
+   Verified against the fixtures before writing any code. The only residual is
+   the `max-crates` cutoff, which is already reported as "not audited". Nothing
+   was built for this; the write-up was the defect.
+2. **Newly-added crates get no dependency lane** — CLOSED. The lane was gated on
+   the crate having an old version. It now falls back to the repo's pre-PR
+   lockfile (`base_pkgs.tsv`, written by `parse_lockdiff.sh`) as the reference
+   for what counts as new, so adding a brand-new direct dependency that itself
+   pulls a downloader is caught. A dependency the repo already had is correctly
+   not re-reported.
+3. **New deps skip the no-source-repo check** — CLOSED, with the same
+   young/low-adoption gate as everything else in this lane.
+4. **`SRC_ALARM` was a raw grep** — CLOSED, and it changes verdicts. See the
+   3.5.0 CHANGELOG entry.
 
-1. A dependency whose **version** changed is never inspected. The new-dep set is
-   a name-only `comm -13`, so a transitive dep moving 1.0.106 → 1.0.107 and
-   gaining a build script is invisible. Probably the likeliest next variant now
-   that new names attract scrutiny.
-2. **Newly-added crates get no dependency lane at all** (gated on `-n "$oldv"`),
-   so a brand-new direct dependency that itself pulls a downloader is missed.
-3. New deps skip the **no-source-repo** provenance check the audited crate gets.
-4. The audited-crate lane's `SRC_ALARM` is still the loose raw grep, so a
-   comment URL can push an added `build.rs` from `high` to `critical` there. Left
-   alone deliberately to keep 3.3.0 output byte-identical, but the corpus
-   evidence says that rule is wrong too. Fixing it *would* change verdicts, so it
-   belongs in its own release with its own measurement.
+## Still open
+
+- The `max-crates` / `max-new-deps` cutoffs are reported, not audited. That is
+  by design, but a very wide bump still gets a partial read.
+- `CAP_CRATES` (the 34-name capability list in `run_audit.sh`) is untouched and
+  still crude. It only sets `medium` on the plain dependency list and no longer
+  carries much weight now that the source lane exists, but it is dead weight
+  worth revisiting.

@@ -24,7 +24,7 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 126 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 136 passed, 0 failed` / `ALL GREEN`**.
 
 ### What each test proves
 | Test | Proves | Acceptance |
@@ -56,6 +56,9 @@ Expected result: **`RESULT: 126 passed, 0 failed` / `ALL GREEN`**.
 | AE | A new dependency whose `build.rs` only shells out to rustc (the `proc-macro2`/`serde`/`libc` shape) stays a **none**-tier note; signing off the **dependency** suppresses the finding, signing off the **audited crate** does not | 3.4.0 |
 | AF | New-dep edge cases: offline degrades a downloader script to **medium** rather than clearing it, and a dependency with no extracted source (path/git/workspace member) is a **logged skip**, never a silent pass | 3.4.0 |
 | AG | **Typosquat**: a brand-new, barely-downloaded crate one edit from one already in the tree (`pm2lke` beside `pm2like`) tiers **high** with **no build script at all**, naming the crate it shadows; the same near-miss when **established** is a note, not an alarm (the `sha1`/`sha2` case); a separator-only variant is never a squat, since crates.io cannot host both | 3.4.0 |
+| AH | A `build.rs` whose only alarming token is a **URL in a comment** (`urlnote`, the `icu_*_data` shape) is **high**, not critical, and is still reported as an added build script; a script that genuinely shells out stays **critical**; `code_scan.py` emits LF only | 3.5.0 |
+| AI | A **newly-added** crate (empty old version) now gets a dependency lane and its downloader dependency is caught end to end; a dependency the repo **already had** is not re-reported as new | 3.5.0 |
+| AJ | A new dependency with **no source repository** is **high** when young or barely downloaded, and a note when established (the `serde_regex` shape) | 3.5.0 |
 
 `test/fixtures/netcap-0.1.0` (pure compute) vs `netcap-0.2.0` (adds
 `TcpStream::connect` + `Command::spawn`) is the "real version bump that gains
