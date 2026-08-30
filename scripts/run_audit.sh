@@ -35,6 +35,11 @@ export RSA_TARGET_DIR="${RSA_TARGET_DIR:-$WORK/cargo-target}"
 # One crates.io-metadata cache for every new dependency inspected this run, so
 # a dep shared by several audited crates costs one fetch.
 export RSA_DEPMETA_CACHE="${RSA_DEPMETA_CACHE:-$WORK/depmeta}"
+# The repo's pre-PR package set, written by parse_lockdiff.sh next to the diff.
+# Absent when run_audit is driven directly (tests, manual runs); every use is
+# guarded, and the per-probe lockfile is the fallback.
+BASE_NAMES="${RSA_BASE_PKGS:-$(dirname "$LOCKDIFF_TSV")/base_pkgs.tsv}"
+[ -f "$BASE_NAMES" ] || BASE_NAMES="/dev/null"
 SECTIONS="$WORK/sections.md"; : > "$SECTIONS"
 : > "$WORK/flagged.list"; : > "$WORK/clean.list"
 : > "$WORK/evidence.jsonl" 2>/dev/null || true
@@ -168,20 +173,36 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   NEWDEP_TSV="$CDIR/newdep_findings.tsv"; : > "$NEWDEP_TSV"
   DEPCAPPED=""; DEPCAPPED_N=0
   OLD_LOCK="$CDIR/old/Cargo.lock"; NEW_LOCK="$CDIR/new/Cargo.lock"
-  if [ -n "${oldv:-}" ] && [ -f "$OLD_LOCK" ] && [ -f "$NEW_LOCK" ]; then
-    pkg_set "$OLD_LOCK" > "$CDIR/old_pkgs.txt"
+  # A newly-added crate has no old probe to diff against, and until now that
+  # meant it got no dependency lane at all: adding a brand-new direct dependency
+  # that itself pulls a downloader was invisible. The repo's PRE-PR lockfile is
+  # the right reference in that case, since it says what you already depended on.
+  if [ -f "$NEW_LOCK" ]; then
     pkg_set "$NEW_LOCK" > "$CDIR/new_pkgs.txt"
+    if [ -n "${oldv:-}" ] && [ -f "$OLD_LOCK" ]; then
+      pkg_set "$OLD_LOCK" > "$CDIR/old_pkgs.txt"
+      REF_NAMES="$CDIR/ref_names.txt"
+      awk '{print $1}' "$CDIR/old_pkgs.txt" | sort -u > "$REF_NAMES"
+    else
+      : > "$CDIR/old_pkgs.txt"
+      REF_NAMES="$CDIR/ref_names.txt"
+      awk '{print $1}' "$BASE_NAMES" 2>/dev/null | sort -u > "$REF_NAMES" || : > "$REF_NAMES"
+    fi
     # Diff on names but keep the new lockfile's version per new dependency —
     # inspect_new_dep.sh needs it to locate the extracted source (until 3.4.0
     # the version was thrown away here and no new dependency was ever read).
-    comm -13 <(awk '{print $1}' "$CDIR/old_pkgs.txt" | sort -u) \
-             <(awk '{print $1}' "$CDIR/new_pkgs.txt" | sort -u) \
+    comm -13 "$REF_NAMES" <(awk '{print $1}' "$CDIR/new_pkgs.txt" | sort -u) \
       | grep -vxE "probe_lib|$name" > "$CDIR/new_dep_names.txt" 2>/dev/null || true
     awk 'NR==FNR{want[$1]=1;next} want[$1]{print $1 "\t" $2}' \
       "$CDIR/new_dep_names.txt" "$CDIR/new_pkgs.txt" > "$CDIR/new_deps.tsv"
-    # The names the OLD lockfile already resolved: what a typosquat would be
-    # shadowing. proc-macro2 was in the tree before proc-macro1 arrived.
-    awk '{print $1}' "$CDIR/old_pkgs.txt" | sort -u > "$CDIR/tree_names.txt"
+    # What a typosquat would be shadowing: the crates you already depended on
+    # before this PR. proc-macro2 was in the tree before proc-macro1 arrived.
+    # The repo-wide pre-PR set beats the per-probe one when we have it.
+    if [ -s "$BASE_NAMES" ]; then
+      awk '{print $1}' "$BASE_NAMES" | sort -u > "$CDIR/tree_names.txt"
+    else
+      cp "$REF_NAMES" "$CDIR/tree_names.txt"
+    fi
     DEPN=0
     while IFS=$'\t' read -r dep depv; do
       [ -n "$dep" ] || continue

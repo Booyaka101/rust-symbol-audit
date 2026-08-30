@@ -4,6 +4,62 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] — 2026-08-30
+
+Closes the gaps 3.4.0 left open in its own PROGRESS notes. One of the four
+turned out not to exist, which is recorded below rather than quietly dropped.
+
+⚠️ **This changes verdicts in both directions.** A build script whose only
+alarming token sits in a comment now tiers `high` instead of `critical`, so a
+repo on `fail-on: critical` may newly pass where it used to fail. It is still
+reported as an added build script, and `fail-on: high` catches it either way.
+In the other direction, a newly-added crate now gets a dependency lane it never
+had, and a new dependency with no source repository is a finding, so some bumps
+will newly fail.
+
+### Added
+
+- **A newly-added crate gets a dependency lane.** The lane was gated on the
+  crate having an old version to diff against, so adding a brand-new direct
+  dependency that itself pulled in a downloader produced nothing at all. It now
+  falls back to the repo's pre-PR lockfile, written alongside the diff by
+  `parse_lockdiff.sh`, as the reference for what actually counts as new. A
+  dependency the repo already had is not re-reported.
+- **`no-source-repo` for new dependencies.** The provenance lane has always
+  flagged a missing source repository for the audited crate and never saw a new
+  dependency. Sampling 120 random real crate names, exactly one lacks a
+  repository (`serde_regex`, 46M downloads), so it is a rare tell that still
+  happens to legitimate crates. Same gate as the rest of the lane: missing *and*
+  young or barely downloaded is `high`, missing but established is a note.
+
+### Changed
+
+- **The compile-time alarm reads code, not comments.** `SRC_ALARM` decides
+  whether an added or changed `build.rs` is `high` or `critical`, and it was a
+  raw grep, so a URL in a comment counted as networking. Measured over the same
+  224 real build scripts: it matched 122 raw, 99 with comments stripped, and
+  **23 matched only through a comment**. Those 23 are the entire `icu_*_data`
+  family plus `portable-atomic` and `radium`, escalated to `critical` for
+  linking to a rust-lang issue. A build script that genuinely shells out is
+  still `critical`, asserted in the suite.
+- The build-script scanning that `lib.sh` did with a grep plus a helper is now
+  one pass in `code_scan.py`, which emits every fact the callers need. It forces
+  LF on stdout: Windows python was translating to CRLF, putting a stray carriage
+  return into every fact value, which survived only because Git Bash's awk
+  happens to tolerate it.
+
+### Not a defect after all
+
+3.4.0's notes claimed a dependency whose **version** changed was never
+inspected. That was wrong, and checking it before writing code is what caught
+it. `parse_lockdiff.sh` diffs the whole lockfile, so a transitive dependency
+moving 1.0.106 to 1.0.107 already becomes its own audited row and
+`inspect_source.sh` already catches an added or changed build script there. The
+only residual is the `max-crates` cutoff, which is already reported as "not
+audited". Nothing was built for it.
+
+Local suite: 136 checks, up from 126.
+
 ## [3.4.0] — 2026-08-30
 
 The dependency lane now reads the source of every crate a bump newly pulls in,

@@ -56,6 +56,9 @@ publishes it, or ship a known vuln?*
    **`proc-macro = true`**, or a new **`links =`** native lib. Code that runs *on
    your build machine at compile time* — and the comment shows the **actual
    build-script diff**, not just "it changed". Symbol-diffing is blind to this.
+   Whether that build script is `high` or `critical` is decided by reading its
+   **code**, with comments stripped: 23 of 224 real build scripts were being
+   escalated purely for linking to a rust-lang issue in a comment.
 3. **Dependency tree** — crates the bump **newly pulls into your build**, and for
    each one it reads the crate's **actual source**: a **`build.rs`** that both
    fetches something remote *and* executes it, a switch to **`proc-macro = true`**,
@@ -70,7 +73,11 @@ publishes it, or ship a known vuln?*
    barely-downloaded crate whose name is one character from one your tree
    *already* depends on, which is how `proc-macro1` rode in beside
    `proc-macro2`. That fires on the name alone, so it still catches a squat
-   whose payload is hidden too well for the build-script check.
+   whose payload is hidden too well for the build-script check. A new dependency
+   that declares **no source repository** on crates.io, and is itself young or
+   barely downloaded, is flagged too. This lane runs for a **newly-added** crate
+   as well, using the lockfile from before the PR to decide what is genuinely
+   new.
 4. **Provenance** *(network)* — via the crates.io API: a version **published by a
    different account** than before, a crate with **no source repository**, a
    **yanked** version, a version **crates.io no longer lists** (deleted from the
@@ -228,7 +235,7 @@ lister (GNU `nm`, or `rustup component add llvm-tools` → `llvm-nm`, auto-detec
 on Windows). In **Git Bash**:
 
 ```bash
-bash test/run_local.sh      # -> RESULT: 126 passed, 0 failed / ALL GREEN
+bash test/run_local.sh      # -> RESULT: 136 passed, 0 failed / ALL GREEN
 ```
 
 Exercises all five lanes, the ledger ratchet, config suppression, gating, the

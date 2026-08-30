@@ -92,7 +92,7 @@ if [ ! -f "$META" ]; then
 fi
 
 # AGE_SECS \t DOWNLOADS \t AGE_STR, any field "unknown" when unavailable.
-read -r AGE_SECS DOWNLOADS AGE_STR <<EOF2
+read -r AGE_SECS DOWNLOADS HAS_REPO AGE_STR <<EOF2
 $(PYTHONPATH="$HERE" python3 - "$META" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
@@ -109,9 +109,11 @@ try:
 except (TypeError, ValueError):
     pass
 dl = c.get("downloads")
-print("%s\t%s\t%s" % (
+has_repo = "unknown" if not data else ("1" if c.get("repository") else "0")
+print("%s\t%s\t%s\t%s" % (
     int(secs) if secs is not None else "unknown",
     dl if isinstance(dl, int) else "unknown",
+    has_repo,
     rel_age(max(secs, 0)) if secs is not None else "unknown"))
 PY
 )
@@ -144,6 +146,21 @@ if [ -n "$BS" ]; then
       sed -n '1,40p' "$BS"; } > "$OUTDIR/build_rs_excerpt.txt" 2>/dev/null || true
   else
     add_finding none new-dep-build-script "\`$DEP\` $DEPV $CTX ships a build script with no remote-fetch-and-execute tokens — normal for -sys and version-probing crates"
+  fi
+fi
+
+# --- no source repository --------------------------------------------------
+# The provenance lane makes this a finding for the AUDITED crate but never saw
+# a new dependency. Measured over a 120-crate random sample of real names, only
+# one lacked a repository (serde_regex, 46M downloads), so it is a rare and
+# useful tell, but it does happen to legitimate crates. Gated on the same
+# asymmetry as everything else here: unattributable AND new/unadopted alarms,
+# unattributable but established is a note.
+if [ "$HAS_REPO" = "0" ]; then
+  if [ "$young" -eq 1 ] || [ "$low" -eq 1 ]; then
+    add_finding high new-dep-no-source-repo "new dependency \`$DEP\` $DEPV $CTX declares NO source repository on crates.io, so the published code cannot be traced back to a git source"
+  else
+    add_finding none new-dep-no-source-repo "\`$DEP\` $DEPV declares no source repository on crates.io, but it is established $CTX — not flagged"
   fi
 fi
 

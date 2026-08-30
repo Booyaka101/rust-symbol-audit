@@ -797,6 +797,93 @@ have "$AGWORK/est_run/crates/carrier/newdep.filtered" 'not flagged' \
 echo
 
 # ===========================================================================
+echo "### TEST AH — a URL in a COMMENT is not compile-time capability"
+# 23 of 224 real build scripts (every icu_*_data crate, portable-atomic, radium)
+# matched SRC_ALARM only through a URL in a comment, which escalated a merely
+# added build script to critical. The alarm now reads code, not comments.
+export RSA_FIXTURES="$FIX"
+AHWORK="$WORK/ah"; mkdir -p "$AHWORK"
+printf 'urlnote\t0.1.0\t0.2.0\n' > "$AHWORK/lockdiff.tsv"
+LOCKDIFF_TSV="$AHWORK/lockdiff.tsv" WORK="$AHWORK/run" REVIEWS="/nonexistent" \
+  RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 RSA_DRY_RUN=1 PR_NUMBER="" \
+  GITHUB_OUTPUT="$AHWORK/out.txt" "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AHWORK/run.log"
+echo "  --- source_findings.filtered ---"; sed 's/^/    /' "$AHWORK/run/crates/urlnote/source_findings.filtered" 2>/dev/null
+have "$AHWORK/out.txt" 'tier=high' \
+  && ok "build script whose only alarm token is a comment URL is HIGH, not critical" \
+  || bad "expected tier=high ($(grep '^tier=' "$AHWORK/out.txt" 2>/dev/null))"
+have "$AHWORK/run/crates/urlnote/source_findings.filtered" 'ADDED a build script' \
+  && ok "and it is still flagged as an added build script (fail-on: high still catches it)" \
+  || bad "added build script no longer reported at all"
+# the guard: a build script that REALLY shells out must stay critical
+grep -q 'critical' "$WORK/e/source_findings.tsv" 2>/dev/null \
+  && ok "a build script that genuinely shells out is still CRITICAL (netcap 0.3.0)" \
+  || bad "real shell-out no longer critical - the rule was loosened too far"
+# and the scanner must emit LF only: a CR would ride into every fact value
+SRC_ALARM='command::new' SRC_FETCH='curl' SRC_EXEC='command::new' \
+  python3 "$SCRIPTS/code_scan.py" "$FIX/pm2like-1.0.0/build.rs" | od -c | grep -q '\\r' \
+  && bad "code_scan.py emitted CR (fact values would carry a stray \\r)" \
+  || ok "code_scan.py emits LF only on this platform"
+echo
+
+# ===========================================================================
+echo "### TEST AI — a NEWLY-ADDED crate gets a dependency lane too"
+# Until now the lane was gated on the crate having an old version, so adding a
+# brand-new direct dependency that itself pulls a downloader was invisible.
+export RSA_FIXTURES="$FIX"
+AIWORK="$WORK/ai"; mkdir -p "$AIWORK/cratesio"
+python3 - "$FIX/cratesio/dlmacro.json.template" "$AIWORK/cratesio/dlmacro.json" <<'PY'
+import sys
+from datetime import datetime, timedelta, timezone
+ts = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+open(sys.argv[2], "w").write(open(sys.argv[1]).read().replace("__CREATED_AT__", ts))
+PY
+printf 'carrier\t\t0.2.0\n' > "$AIWORK/lockdiff.tsv"     # empty old version = newly added
+LOCKDIFF_TSV="$AIWORK/lockdiff.tsv" WORK="$AIWORK/run" REVIEWS="/nonexistent" \
+  RSA_CRATESIO_FIXTURE="$AIWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AIWORK/out.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AIWORK/run.log"
+grep -qx "$(printf 'dlmacro\t1.0.0')" "$AIWORK/run/crates/carrier/new_deps.tsv" 2>/dev/null \
+  && ok "a newly-added crate's own dependencies are now enumerated" || bad "no dep lane for a newly-added crate"
+have "$AIWORK/out.txt" 'tier=critical' \
+  && ok "and its downloader dependency is caught end to end" \
+  || bad "expected tier=critical ($(grep '^tier=' "$AIWORK/out.txt" 2>/dev/null))"
+# ...but a dependency the repo ALREADY had must not be reported as new
+printf 'dlmacro\t1.0.0\n' > "$AIWORK/base_pkgs.tsv"
+LOCKDIFF_TSV="$AIWORK/lockdiff.tsv" WORK="$AIWORK/run2" REVIEWS="/nonexistent" \
+  RSA_BASE_PKGS="$AIWORK/base_pkgs.tsv" \
+  RSA_CRATESIO_FIXTURE="$AIWORK/cratesio" RSA_CHECK_PROVENANCE=0 RSA_CHECK_ADVISORIES=0 \
+  RSA_DRY_RUN=1 PR_NUMBER="" GITHUB_OUTPUT="$AIWORK/out2.txt" \
+  "$SCRIPTS/run_audit.sh" >/dev/null 2>"$AIWORK/run2.log"
+[ ! -s "$AIWORK/run2/crates/carrier/new_deps.tsv" ] \
+  && ok "a dependency the repo already had is not re-reported as new" \
+  || bad "already-present dependency reported as new: $(cat "$AIWORK/run2/crates/carrier/new_deps.tsv")"
+have "$AIWORK/out2.txt" 'tier=none' && ok "so that bump comes back clean" \
+  || bad "expected tier=none ($(grep '^tier=' "$AIWORK/out2.txt" 2>/dev/null))"
+echo
+
+# ===========================================================================
+echo "### TEST AJ — a new dependency with no source repository"
+# The provenance lane flags this for the audited crate but never saw a new
+# dependency. Rare in practice: 1 of a random 120 real crates (serde_regex),
+# and that one is established, so the same young/low-adoption gate applies.
+AJWORK="$WORK/aj"; mkdir -p "$AJWORK"
+RSA_CRATESIO_FIXTURE="$AIWORK/cratesio" "$SCRIPTS/inspect_new_dep.sh" dlmacro 1.0.0 "$AJWORK/young" >/dev/null 2>"$AJWORK/y.log"
+awk -F'\t' '$1=="high"&&$2=="new-dep-no-source-repo"{f=1} END{exit !f}' "$AJWORK/young/newdep_findings.tsv" \
+  && ok "young dependency with no source repo -> high" || bad "no-source-repo not flagged"
+# established + no repo (the serde_regex shape) must be a note, not an alarm
+mkdir -p "$AJWORK/est"
+python3 - "$FIX/cratesio/dlmacro.json.template" "$AJWORK/est/dlmacro.json" <<'PY'
+import sys
+s = open(sys.argv[1]).read().replace("__CREATED_AT__", "2016-02-27T00:00:00.000000Z")
+open(sys.argv[2], "w").write(s.replace('"downloads": 0', '"downloads": 46372639'))
+PY
+RSA_CRATESIO_FIXTURE="$AJWORK/est" "$SCRIPTS/inspect_new_dep.sh" dlmacro 1.0.0 "$AJWORK/estrun" >/dev/null 2>"$AJWORK/e.log"
+awk -F'\t' '$1=="none"&&$2=="new-dep-no-source-repo"{f=1} END{exit !f}' "$AJWORK/estrun/newdep_findings.tsv" \
+  && ok "established dependency with no source repo is a note, not an alarm" \
+  || bad "established no-repo crate wrongly alarmed"
+echo
+
+# ===========================================================================
 echo "==================================================================="
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && echo "ALL GREEN" || echo "SOME FAILURES — inspect logs under $WORK"

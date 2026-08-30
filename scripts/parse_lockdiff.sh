@@ -71,6 +71,12 @@ trap 'rm -f "$OLD_MAP" "$NEW_MAP"' EXIT
 pkgmap "$BASE_SHA" | sort -u > "$OLD_MAP"
 pkgmap "$HEAD_REF" | sort -u > "$NEW_MAP"
 
+# Keep the pre-PR package set next to the diff. run_audit needs "what this repo
+# already depended on" for two things a per-probe lockfile cannot answer: which
+# crates a NEWLY-ADDED dependency really brings in (as opposed to ones you
+# already had), and what a typosquat would be shadowing.
+cp "$OLD_MAP" "$(dirname "$OUT")/base_pkgs.tsv" 2>/dev/null || true
+
 declare -A OLDV
 while IFS=$'\t' read -r n v; do
   [ -n "$n" ] && OLDV["$n"]="$v"
