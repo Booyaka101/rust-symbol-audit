@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-10-24
+
 ### Fixed
 
 - Incomplete build, symbol or source inspection and audit caps now require
