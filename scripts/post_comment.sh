@@ -38,7 +38,12 @@ if [ -z "${BODY_FILE:-}" ]; then
     critical) verdict="🔴 **CRITICAL** — \`$crate\` $reason" ;;
     high)     verdict="🟠 **HIGH** — \`$crate\` $reason" ;;
     medium)   verdict="🟡 **MEDIUM** — \`$crate\` $reason" ;;
-    none)     verdict="🟢 **CLEAR** — no sensitive dependency changes detected" ;;
+    none)
+      if [ "${AUDIT_COMPLETE:-true}" = false ]; then
+        verdict="⚠️ **INCOMPLETE**: no findings flagged, but some changes could not be inspected"
+      else
+        verdict="🟢 **CLEAR** — no sensitive dependency changes detected"
+      fi ;;
     *)        verdict="$OVERALL_TIER" ;;
   esac
   # pluralize the advisory count

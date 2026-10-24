@@ -16,6 +16,7 @@
 #      RSA_MIN_PUBLISH_AGE_HOURS RSA_TYPOSQUAT_DISTANCE GH_TOKEN RSA_DRY_RUN
 #      RSA_TARGET_DIR
 set -euo pipefail
+export PYTHONUTF8=1
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib.sh
 . "$HERE/lib.sh"
@@ -43,6 +44,12 @@ BASE_NAMES="${RSA_BASE_PKGS:-$(dirname "$LOCKDIFF_TSV")/base_pkgs.tsv}"
 SECTIONS="$WORK/sections.md"; : > "$SECTIONS"
 : > "$WORK/flagged.list"; : > "$WORK/clean.list"
 : > "$WORK/evidence.jsonl" 2>/dev/null || true
+: > "$WORK/incomplete.txt"
+: > "$WORK/audited.list"
+incomplete() {
+  log "run_audit: incomplete: $*"
+  printf '%s\n' "$*" >> "$WORK/incomplete.txt"
+}
 
 if [ ! -s "$LOCKDIFF_TSV" ]; then
   log "run_audit: no changed crates in $LOCKDIFF_TSV — nothing to do"
@@ -141,6 +148,7 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   INDEX=$((INDEX + 1))
   if [ "$INDEX" -gt "$MAX_CRATES" ]; then
     NOTAUDITED="${NOTAUDITED:+$NOTAUDITED, }\`$name\`"
+    incomplete "$name $newv was not audited (max-crates=$MAX_CRATES)"
     continue
   fi
   if is_ignored "$name"; then
@@ -151,21 +159,28 @@ while IFS= read -r _line || [ -n "$_line" ]; do
 
   CRATES_DONE=$((CRATES_DONE + 1))
   CDIR="$WORK/crates/$name"; mkdir -p "$CDIR"
+  if grep -qxF "$CDIR" "$WORK/audited.list"; then
+    CDIR="$WORK/crates/$name-$newv"; mkdir -p "$CDIR"
+  fi
+  printf '%s\n' "$CDIR" >> "$WORK/audited.list"
   log "=== auditing $name : ${oldv:-<new>} -> $newv ==="
 
   OLD_RLIB=""; OLD_ERR=""
   if [ -n "${oldv:-}" ]; then
-    if OLD_RLIB="$("$HERE/build_crate.sh" "$oldv" "$name" "$CDIR/old" 2>>"$CDIR/build.log")"; then :; else
+    if OLD_RLIB="$(env -u GH_TOKEN -u GITHUB_TOKEN "$HERE/build_crate.sh" "$oldv" "$name" "$CDIR/old" 2>>"$CDIR/build.log")"; then :; else
       OLD_RLIB=""; OLD_ERR="1"
     fi
   fi
   NEW_RLIB=""; NEW_ERR=""
-  if NEW_RLIB="$("$HERE/build_crate.sh" "$newv" "$name" "$CDIR/new" 2>>"$CDIR/build.log")"; then :; else
+  if NEW_RLIB="$(env -u GH_TOKEN -u GITHUB_TOKEN "$HERE/build_crate.sh" "$newv" "$name" "$CDIR/new" 2>>"$CDIR/build.log")"; then :; else
     NEW_RLIB=""; NEW_ERR="1"
   fi
+  [ -z "$NEW_ERR" ] || incomplete "$name $newv could not be built for symbol inspection"
+  [ -z "$OLD_ERR" ] || incomplete "$name $oldv could not be built for the symbol baseline"
 
   # capability lanes (allow-filtered) -----------------------------------------
-  "$HERE/inspect_source.sh" "$name" "${oldv:-}" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
+  "$HERE/inspect_source.sh" "$name" "${oldv:-}" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" \
+    || incomplete "$name $newv source inspection failed"
   apply_allow "$name" "$CDIR/source_findings.tsv" > "$CDIR/source_findings.filtered" 2>/dev/null || true
   SRC_TSV_F="$CDIR/source_findings.filtered"
 
@@ -218,10 +233,15 @@ while IFS= read -r _line || [ -n "$_line" ]; do
       # against is this crate's old lockfile, and an exported value would
       # outlive the iteration that computed it.
       RSA_TREE_NAMES="$CDIR/tree_names.txt" \
-        "$HERE/inspect_new_dep.sh" "$dep" "$depv" "$DEPDIR" >/dev/null 2>>"$CDIR/build.log" || true
+        "$HERE/inspect_new_dep.sh" "$dep" "$depv" "$DEPDIR" >/dev/null 2>>"$CDIR/build.log" \
+        || incomplete "$dep $depv dependency inspection failed"
+      if awk -F'\t' '$2=="new-dep-not-inspected" || $2=="new-dep-build-script-unreadable" {f=1} END{exit !f}' "$DEPDIR/newdep_findings.tsv"; then
+        incomplete "$dep $depv dependency source could not be inspected"
+      fi
       cat "$DEPDIR/newdep_findings.tsv" >> "$NEWDEP_TSV" 2>/dev/null || true
     done < "$CDIR/new_deps.tsv"
     if [ -n "$DEPCAPPED" ]; then
+      incomplete "$name $newv has $DEPCAPPED_N dependencies not source-inspected (max-new-deps=$MAX_NEW_DEPS)"
       log "run_audit: $name pulls $DEPCAPPED_N new dep(s) over max-new-deps=$MAX_NEW_DEPS — NOT source-inspected: $DEPCAPPED"
       printf 'none\tnew-dep-cap\t\t\t%s\n' \
         "$DEPCAPPED_N new dependenc(ies) over \`max-new-deps\`=$MAX_NEW_DEPS were NOT source-inspected: $DEPCAPPED" >> "$NEWDEP_TSV"
@@ -249,10 +269,13 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   ADDED_COUNT=0
   RISK_TSV_F="$CDIR/risk.filtered"; : > "$RISK_TSV_F"
   if [ -n "$NEW_RLIB" ]; then
-    "$HERE/diff_symbols.sh" "$OLD_RLIB" "$NEW_RLIB" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
-    ADDED_COUNT="$(count_lines "$CDIR/added_syms.txt")"
-    "$HERE/risk_check.sh" "$CDIR/added_syms.txt" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
-    apply_allow "$name" "$CDIR/risk.tsv" > "$RISK_TSV_F" 2>/dev/null || true
+    if "$HERE/diff_symbols.sh" "$OLD_RLIB" "$NEW_RLIB" "$CDIR" >/dev/null 2>>"$CDIR/build.log" \
+      && "$HERE/risk_check.sh" "$CDIR/added_syms.txt" "$CDIR" >/dev/null 2>>"$CDIR/build.log"; then
+      ADDED_COUNT="$(count_lines "$CDIR/added_syms.txt")"
+      apply_allow "$name" "$CDIR/risk.tsv" > "$RISK_TSV_F" 2>/dev/null || true
+    else
+      incomplete "$name $newv symbol inspection failed"
+    fi
   fi
 
   # ledger ratchet ------------------------------------------------------------
@@ -456,6 +479,15 @@ fi
 if [ -n "$NOTAUDITED" ]; then
   printf '⏭️ Not audited (over `max-crates`=%s): %s\n\n' "$MAX_CRATES" "$NOTAUDITED" >> "$SECTIONS"
 fi
+COMPLETE=true
+if [ -s "$WORK/incomplete.txt" ]; then
+  COMPLETE=false
+  {
+    printf '> ⚠️ Audit incomplete. Review is required even if no findings were flagged.\n\n'
+    sed 's/^/- /' "$WORK/incomplete.txt"
+    printf '\n'
+  } >> "$SECTIONS"
+fi
 
 # --- Dependabot / Renovate recommendation ----------------------------------
 PR_AUTHOR="${PR_AUTHOR:-}"; is_bot=0
@@ -463,12 +495,12 @@ case "$PR_AUTHOR" in
   dependabot*|renovate*|*\[bot\]) is_bot=1;;
 esac
 RECOMMENDATION="review"
-[ "$(tier_rank "$OVERALL")" -eq 0 ] && RECOMMENDATION="auto-merge"
+[ "$(tier_rank "$OVERALL")" -eq 0 ] && [ "$COMPLETE" = true ] && RECOMMENDATION="auto-merge"
 if [ "$is_bot" -eq 1 ]; then
   if [ "$RECOMMENDATION" = "auto-merge" ]; then
     banner="> 🤖 **Bot dependency bump — ✅ no new capability, advisory, or provenance change. Safe to auto-merge.**"
   else
-    banner="> 🤖 **Bot dependency bump — ⚠️ changed the risk surface (see below). Review before merging.**"
+    banner="> 🤖 **Bot dependency bump: findings or incomplete inspection require review before merging.**"
   fi
   # Prepend by streaming, not "$(cat)": command substitution strips the trailing
   # newlines and the next block's `---` then glues onto the last `</details>`.
@@ -479,7 +511,7 @@ fi
 REPORT="$WORK/audit-report.json"
 OVERALL="$OVERALL" FAIL_ON="$FAIL_ON" RECOMMENDATION="$RECOMMENDATION" \
 AUDITED="$CRATES_DONE" FLAGGED="$FLAGGED" \
-python3 "$HERE/build_report.py" "$WORK/crates" > "$REPORT" 2>>"$WORK/report.log" || true
+python3 "$HERE/build_report.py" "$WORK/crates" "$WORK/audited.list" > "$REPORT" 2>>"$WORK/report.log"
 
 log "run_audit: overall=$OVERALL crates=$CRATES_DONE flagged=$FLAGGED_COUNT reco=$RECOMMENDATION advisories=$ADVISORY_COUNT"
 set_output "tier=$OVERALL"
@@ -488,11 +520,12 @@ set_output "flagged=$FLAGGED"
 set_output "build-script-changes=$BUILD_SCRIPT_CHANGES"
 set_output "advisories=$ADVISORY_COUNT"
 set_output "recommendation=$RECOMMENDATION"
+set_output "complete=$COMPLETE"
 set_output "report=$REPORT"
 
 OVERALL_TIER="$OVERALL" OVERALL_CRATE="$OVERALL_CRATE" OVERALL_REASON="$OVERALL_REASON" \
 CRATE_COUNT="$CRATES_DONE" FLAGGED_COUNT="$FLAGGED_COUNT" ADVISORY_COUNT="$ADVISORY_COUNT" \
-RECOMMENDATION="$RECOMMENDATION" SECTIONS_FILE="$SECTIONS" \
+RECOMMENDATION="$RECOMMENDATION" AUDIT_COMPLETE="$COMPLETE" SECTIONS_FILE="$SECTIONS" \
   "$HERE/post_comment.sh"
 
 # --- gating ----------------------------------------------------------------

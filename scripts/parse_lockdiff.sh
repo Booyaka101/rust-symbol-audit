@@ -42,6 +42,8 @@ fi
 if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
   git fetch --no-tags --depth=1 origin "$BASE_SHA" >/dev/null 2>&1 || true
 fi
+git cat-file -e "${BASE_SHA}^{commit}"
+git cat-file -e "${HEAD_REF}^{commit}"
 
 # No Cargo.lock change at all -> silent success.
 if git diff --quiet "$BASE_SHA" "$HEAD_REF" -- "$LOCKPATH" 2>/dev/null; then
@@ -53,6 +55,7 @@ fi
 # Print "name<TAB>version" for every [[package]] block in a given ref's lockfile.
 pkgmap() {
   local ref="$1"
+  git cat-file -e "${ref}:${LOCKPATH}" 2>/dev/null || return 0
   git show "${ref}:${LOCKPATH}" 2>/dev/null | awk '
     /^\[\[package\]\]/            { name=""; ver=""; inpkg=1; next }
     /^\[/ && $0 !~ /^\[\[package\]\]/ { inpkg=0 }
@@ -77,14 +80,22 @@ pkgmap "$HEAD_REF" | sort -u > "$NEW_MAP"
 # already had), and what a typosquat would be shadowing.
 cp "$OLD_MAP" "$(dirname "$OUT")/base_pkgs.tsv" 2>/dev/null || true
 
-declare -A OLDV
+declare -A OLDV OLD_PKGS NEW_PKGS
 while IFS=$'\t' read -r n v; do
-  [ -n "$n" ] && OLDV["$n"]="$v"
+  [ -n "$n" ] && NEW_PKGS["$n@$v"]=1
+done < "$NEW_MAP"
+while IFS=$'\t' read -r n v; do
+  [ -n "$n" ] || continue
+  OLD_PKGS["$n@$v"]=1
+  # Only a removed version is a baseline. An unchanged parallel version must
+  # neither become a bump nor be used as the old side of a newly-added version.
+  [ -n "${NEW_PKGS[$n@$v]:-}" ] || OLDV["$n"]="$v"
 done < "$OLD_MAP"
 
 count=0
 while IFS=$'\t' read -r n v; do
   [ -n "$n" ] || continue
+  [ -z "${OLD_PKGS[$n@$v]:-}" ] || continue
   old="${OLDV[$n]:-}"
   if [ -z "$old" ]; then
     printf '%s\t\t%s\n' "$n" "$v" >> "$OUT"          # newly added crate

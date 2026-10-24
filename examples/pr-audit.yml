@@ -26,6 +26,7 @@ jobs:
           # simplest guarantee. (The action also best-effort-fetches base.sha,
           # but fetch-depth: 0 removes all doubt.)
           fetch-depth: 0
+          persist-credentials: false
 
       - name: rust-symbol-audit
         # In your own repo, replace this with:  uses: booyaka101/rust-symbol-audit@v3

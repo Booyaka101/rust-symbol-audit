@@ -30,9 +30,9 @@ bad()  { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 have() { grep -qiE "$2" "$1"; }
 
 echo "### Python comment-scanner regressions"
-python3 -m unittest discover -s "$PROJECT/test" -p test_code_scan.py \
-  && ok "Rust literals and nested comments scanned correctly" \
-  || bad "comment-scanner regressions"
+python3 -m unittest discover -s "$PROJECT/test" -p 'test_*.py' \
+  && ok "Python scanner and pipeline regressions" \
+  || bad "Python regressions"
 
 # ===========================================================================
 echo "### TEST A — build_crate + diff_symbols + risk_check (fixtures, offline)"

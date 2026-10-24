@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
+        with: { fetch-depth: 0, persist-credentials: false }
       - uses: booyaka101/rust-symbol-audit@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -176,6 +176,16 @@ jobs:
 To auto-merge boring Dependabot bumps and hold risky ones, see
 [`examples/auto-merge.yml`](examples/auto-merge.yml) (gates GitHub auto-merge on
 the `recommendation` output).
+
+The action requires Python 3.11 or later for Cargo manifest parsing.
+`ubuntu-latest` includes it.
+
+**Runner safety:** symbol analysis builds dependencies, which executes their
+build scripts and proc-macros before the final verdict. This is not a sandbox.
+Use disposable, unprivileged runners, do not expose secrets to the audit job,
+and never run untrusted dependency changes with `pull_request_target` privileges.
+The build subprocesses do not receive `GH_TOKEN` or `GITHUB_TOKEN`, but this does
+not isolate them from other environment variables, files, or runner credentials.
 
 ### Inputs
 
@@ -204,8 +214,14 @@ the `recommendation` output).
 | `flagged` | Comma-separated crates with a flagged signal. |
 | `build-script-changes` | Count of crates whose build script was added/changed. |
 | `advisories` | Count of known RustSec/OSV advisories found. |
-| `recommendation` | `auto-merge` (tier none) or `review` — gate Dependabot auto-merge on this. |
+| `recommendation` | `auto-merge` (tier none and complete inspection) or `review`. Capped or failed inspection always requires review, without changing risk tiers. |
+| `complete` | `true` when all non-ignored changes received build, symbol and source inspection within the caps; otherwise `false`. Does not attest network availability or detection completeness. |
 | `report` | Path to the machine-readable `audit-report.json` evidence file. |
+
+The JSON report includes `complete` and `incomplete_reasons`. Evidence is uploaded
+even when `fail-on` makes the audit step fail. Explicitly ignored crates do not
+make an audit incomplete. Network lanes still degrade gracefully offline; a
+complete report is not a guarantee that advisory or provenance data was available.
 
 ### Suppressing false positives — `.rust-symbol-audit.toml`
 

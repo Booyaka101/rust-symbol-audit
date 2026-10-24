@@ -6,7 +6,7 @@ emits one JSON object to stdout: the overall verdict plus every finding, grouped
 by crate and lane. This is the artifact a compliance / SLSA process keeps as the
 record that the dependency change was reviewed.
 
-Usage: build_report.py <crates_dir>
+Usage: build_report.py <crates_dir> [current_audited_dirs_file]
 Env:   OVERALL FAIL_ON RECOMMENDATION AUDITED FLAGGED
 """
 import json
@@ -62,13 +62,25 @@ def crate_record(cdir):
 def main():
     crates_dir = sys.argv[1] if len(sys.argv) > 1 else "."
     crates = []
-    if os.path.isdir(crates_dir):
-        for name in sorted(os.listdir(crates_dir)):
-            cdir = os.path.join(crates_dir, name)
-            if os.path.isdir(cdir):
-                rec = crate_record(cdir)
-                if rec:
-                    crates.append(rec)
+    if len(sys.argv) > 2:
+        with open(sys.argv[2], encoding="utf-8") as fh:
+            dirs = [line.rstrip("\n") for line in fh if line.strip()]
+    elif os.path.isdir(crates_dir):
+        dirs = [os.path.join(crates_dir, name) for name in sorted(os.listdir(crates_dir))]
+    else:
+        dirs = []
+    for cdir in dirs:
+        if os.path.isdir(cdir):
+            rec = crate_record(cdir)
+            if rec:
+                crates.append(rec)
+
+    incomplete_path = os.path.join(os.path.dirname(crates_dir), "incomplete.txt")
+    try:
+        with open(incomplete_path, encoding="utf-8") as fh:
+            incomplete = [line.strip() for line in fh if line.strip()]
+    except FileNotFoundError:
+        incomplete = []
 
     flagged = [c.strip() for c in (os.environ.get("FLAGGED", "") or "").split(",") if c.strip()]
     try:
@@ -83,6 +95,8 @@ def main():
         "overall_tier": os.environ.get("OVERALL", "none"),
         "fail_on": os.environ.get("FAIL_ON", "none"),
         "recommendation": os.environ.get("RECOMMENDATION", "review"),
+        "complete": not incomplete,
+        "incomplete_reasons": incomplete,
         "audited": int(os.environ.get("AUDITED", "0") or 0),
         "flagged": flagged,
         "crates": crates,

@@ -16,8 +16,6 @@ from __future__ import annotations
 import json
 import sys
 
-PROBE = "probe_lib"
-
 
 def package_of(package_id: str) -> tuple[str, str]:
     """Name and version out of a package id, in either cargo spelling.
@@ -59,18 +57,8 @@ def pick(artifacts: list[dict], crate: str, version: str) -> str:
         if rlib_of(artifact):
             return rlib_of(artifact)
 
-    # The package name and the [lib] name can differ, so fall back to the target
-    # name, then to the last rlib that is not the probe: cargo finishes the
-    # direct dependency after everything it pulls in.
-    for artifact in reversed(artifacts):
-        target = artifact.get("target") or {}
-        if target.get("name", "").replace("-", "_") == wanted and rlib_of(artifact):
-            return rlib_of(artifact)
-    for artifact in reversed(artifacts):
-        if package_of(artifact.get("package_id", ""))[0] == PROBE:
-            continue
-        if rlib_of(artifact):
-            return rlib_of(artifact)
+    # A proc-macro or bin-only package may have no rlib. An unrelated dependency
+    # or a mismatched version is not a substitute for the requested artifact.
     return ""
 
 
