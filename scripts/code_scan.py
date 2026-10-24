@@ -8,8 +8,8 @@ a URL sitting in a comment (the whole `icu_*_data` family, `portable-atomic`,
 the ecosystem for the same reason. A build script that merely *links to a blog
 post* is not calling the network.
 
-The `//` inside `http://` is preserved (only a `//` not preceded by `:` starts a
-comment), so a genuine in-code URL still counts.
+String and character literals are preserved, including URLs and comment-like
+text. Rust block comments can nest.
 
 One process emits every fact the callers need, so lib.sh does not pay a
 subprocess per pattern and the stripping logic exists in exactly one place.
@@ -23,10 +23,48 @@ import re
 import sys
 
 
+TOKENS = re.compile(
+    r'r(?P<hashes>\#*)"|"(?:\\.|[^"\\])*(?:"|\Z)'
+    r"|'(?:\\(?:u\{[0-9a-fA-F_]+\}|x[0-9a-fA-F]{2}|.)|[^'\\\n])'"
+    r"|/\*|//",
+    re.S,
+)
+BLOCK_MARKERS = re.compile(r"/\*|\*/")
+
+
 def strip_comments(s):
-    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)   # block comments
-    s = re.sub(r"(?<!:)//[^\n]*", " ", s)          # line comments, not URL schemes
-    return s
+    parts = []
+    pos = 0
+    while True:
+        token = TOKENS.search(s, pos)
+        if token is None:
+            parts.append(s[pos:])
+            return "".join(parts)
+        parts.append(s[pos:token.start()])
+        text = token.group()
+        end = token.end()
+        if token.group("hashes") is not None:
+            terminator = '"' + token.group("hashes")
+            close = s.find(terminator, end)
+            end = len(s) if close == -1 else close + len(terminator)
+        elif text == "//":
+            end = s.find("\n", end)
+            if end == -1:
+                end = len(s)
+        elif text == "/*":
+            depth = 1
+            while depth:
+                marker = BLOCK_MARKERS.search(s, end)
+                if marker is None:
+                    end = len(s)
+                    break
+                depth += 1 if marker.group() == "/*" else -1
+                end = marker.end()
+        if text in ("//", "/*"):
+            parts.append(" ")
+        else:
+            parts.append(s[token.start():end])
+        pos = end
 
 
 def main():

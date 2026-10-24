@@ -4,6 +4,16 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Preserve Rust string and character literals when stripping build-script
+  comments. Literal `/*`, `*/`, or `//` text could previously hide real
+  download-and-execute code from the scan. Raw strings and byte strings are
+  preserved too. Nested block comments are now removed completely, avoiding
+  findings from text that Rust treats as a comment.
+
 ## [3.5.0] — 2026-08-30
 
 Closes the gaps 3.4.0 left open in its own PROGRESS notes. One of the four

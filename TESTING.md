@@ -24,7 +24,9 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 136 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 137 passed, 0 failed` / `ALL GREEN`**.
+The suite also runs the Python comment-scanner regressions. Run those alone with
+`python3 -m unittest discover -s test -p test_code_scan.py`.
 
 ### What each test proves
 | Test | Proves | Acceptance |
