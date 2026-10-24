@@ -29,6 +29,13 @@ ok()   { echo "  ✅ $1"; PASS=$((PASS+1)); }
 bad()  { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 have() { grep -qiE "$2" "$1"; }
 
+echo "### Python comment-scanner regressions"
+if python3 -m unittest discover -s "$PROJECT/test" -p 'test_*.py'; then
+  ok "Python scanner and pipeline regressions"
+else
+  bad "Python regressions"
+fi
+
 # ===========================================================================
 echo "### TEST A — build_crate + diff_symbols + risk_check (fixtures, offline)"
 # Old (no net) and new (TcpStream + Command) versions of the same crate.

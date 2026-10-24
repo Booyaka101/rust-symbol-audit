@@ -14,7 +14,7 @@ and the **live GitHub Action** (for the owner to run in a real repo).
   - Linux/macOS: GNU `nm` (usually already installed).
   - Windows: `rustup component add llvm-tools` provides `llvm-nm.exe`, which
     `test/run_local.sh` auto-detects from the toolchain sysroot.
-- `python3` (JSON serialization in `risk_check.sh`).
+- Python 3.11+ (TOML manifest parsing and JSON serialization).
 
 ### Run
 In **Git Bash** (not PowerShell — these are bash scripts):
@@ -24,7 +24,12 @@ cd /d/Repos/ideas/rust-symbol-audit
 bash test/run_local.sh
 ```
 
-Expected result: **`RESULT: 136 passed, 0 failed` / `ALL GREEN`**.
+Expected result: **`RESULT: 137 passed, 0 failed` / `ALL GREEN`**.
+The suite also runs the Python scanner and pipeline regressions. Run those alone
+with `python3 -m unittest discover -s test -p 'test_*.py'`. They exercise literal
+and nested-comment handling, lockfile additions and parallel versions, Cargo
+build-script rules, incomplete audit recommendations, evidence isolation, and
+artifact identity. Pipeline tests use the local fixture crates and toolchain.
 
 ### What each test proves
 | Test | Proves | Acceptance |

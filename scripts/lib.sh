@@ -139,23 +139,6 @@ SRC_ALARM='process::command|command::new|::exec|tcpstream|udpsocket|std::net|req
 SRC_FETCH='reqwest|ureq|isahc|attohttpc|minreq|\bhyper\b|\bcurl\b|\bwget\b|tcpstream|udpsocket|std::net'
 SRC_EXEC='process::command|command::new|::exec|::spawn|/bin/sh|/bin/bash|powershell|cmd\.exe'
 
-# manifest_has <src_dir> <regex> -> 0 if that dir's Cargo.toml matches.
-manifest_has() {
-  [ -n "$1" ] && [ -f "$1/Cargo.toml" ] && grep -qiE "$2" "$1/Cargo.toml"
-}
-
-# build_rs_path <src_dir> -> path to the build script if the crate has one,
-# including a custom `build = "path"` in [package]. Always exits 0.
-build_rs_path() {
-  local d="$1" p
-  [ -n "$d" ] || return 0
-  if [ -f "$d/build.rs" ]; then printf '%s\n' "$d/build.rs"; return 0; fi
-  p="$(grep -E '^[[:space:]]*build[[:space:]]*=' "$d/Cargo.toml" 2>/dev/null \
-        | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | head -1 || true)"
-  if [ -n "$p" ] && [ -f "$d/$p" ]; then printf '%s\n' "$d/$p"; fi
-  return 0
-}
-
 # inspect_crate_dir <src_dir> -> compile-time facts for ONE source directory
 # (no old side), as key<TAB>value lines on stdout:
 #   build_script <path>      the build script, if any (incl. custom `build =`)
@@ -167,34 +150,28 @@ build_rs_path() {
 # Emits nothing for a missing dir. Both the audited-crate diff and the
 # new-dependency classifier read these same facts.
 inspect_crate_dir() {
-  local d="$1" bs lib
+  local d="$1" bs manifest scan
   [ -n "$d" ] && [ -d "$d" ] || return 0
-  bs="$(build_rs_path "$d" || true)"
+  manifest="$(python3 "$RSA_LIB_DIR/manifest_facts.py" "$d")" || return 1
+  printf '%s\n' "$manifest"
+  bs="$(printf '%s\n' "$manifest" | awk -F'\t' '$1=="build_script"{print $2; exit}')"
   if [ -n "$bs" ]; then
-    printf 'build_script\t%s\n' "$bs"
     if [ -r "$bs" ] && grep -q '' "$bs" 2>/dev/null; then
-      printf 'readable\t1\n'
       # Both facts come from one pass over the script's real code, comments
       # stripped. Measured: 23 of 224 real build scripts matched SRC_ALARM only
       # through a URL in a comment (every icu_*_data crate, portable-atomic,
       # radium), which used to escalate an added build script to critical for no
       # reason. See code_scan.py.
-      SRC_ALARM="$SRC_ALARM" SRC_FETCH="$SRC_FETCH" SRC_EXEC="$SRC_EXEC" \
-        python3 "$RSA_LIB_DIR/code_scan.py" "$bs" 2>/dev/null \
-        || printf 'alarm\t0\nfetch_exec\t0\n'
+      if scan="$(SRC_ALARM="$SRC_ALARM" SRC_FETCH="$SRC_FETCH" SRC_EXEC="$SRC_EXEC" \
+        python3 "$RSA_LIB_DIR/code_scan.py" "$bs" 2>/dev/null)"; then
+        printf 'readable\t1\n%s\n' "$scan"
+      else
+        printf 'readable\t0\n'
+        return 1
+      fi
     else
       printf 'readable\t0\nalarm\t0\nfetch_exec\t0\n'
     fi
-  fi
-  if manifest_has "$d" '^[[:space:]]*proc-macro[[:space:]]*=[[:space:]]*true'; then
-    printf 'proc_macro\t1\n'
-  else
-    printf 'proc_macro\t0\n'
-  fi
-  if manifest_has "$d" '^[[:space:]]*links[[:space:]]*='; then
-    lib="$(grep -E '^[[:space:]]*links[[:space:]]*=' "$d/Cargo.toml" \
-            | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | head -1 || true)"
-    printf 'links\t%s\n' "${lib:-unknown}"
   fi
 }
 

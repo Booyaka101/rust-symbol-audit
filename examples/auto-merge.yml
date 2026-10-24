@@ -1,7 +1,7 @@
 # Example: auto-merge boring Dependabot bumps, hold risky ones for review.
 #
 # rust-symbol-audit annotates each bot bump PR and emits `recommendation`
-# (auto-merge when the overall tier is `none`, else `review`). This workflow
+# (auto-merge when tier is `none` and inspection is complete, else `review`). This workflow
 # enables GitHub auto-merge only when the audit says the bump added no new
 # capability, advisory, or provenance change — so humans only look at the ones
 # that actually changed the risk surface.
@@ -25,6 +25,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - id: audit
         uses: booyaka101/rust-symbol-audit@v3

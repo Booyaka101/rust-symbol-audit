@@ -4,6 +4,32 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [3.6.0] - 2026-10-24
+
+### Fixed
+
+- Incomplete build, symbol or source inspection and audit caps now require
+  review even at tier `none`. The new `complete` output and JSON
+  `incomplete_reasons` explain coverage without inventing a risk finding.
+- Lockfile comparison ignores unchanged parallel versions, audits only new
+  name/version pairs, and accepts a newly-added lockfile with no base file.
+- Build-script discovery honors `[package].build`, including single-quoted
+  paths and `false`, ahead of the default `build.rs`. Manifest settings are
+  parsed as TOML, not matched across unrelated tables. Requires Python 3.11+.
+- Artifact selection no longer substitutes another package or version when
+  the requested crate produced no matching rlib.
+- Evidence includes only the current audit and keeps parallel crate versions
+  separate. The artifact upload runs even after `fail-on` rejects the audit.
+- Build subprocesses no longer inherit `GH_TOKEN` or `GITHUB_TOKEN`. This is
+  defense in depth only; dependency builds are not sandboxed.
+- Preserve Rust string and character literals when stripping build-script
+  comments. Literal `/*`, `*/`, or `//` text could previously hide real
+  download-and-execute code from the scan. Raw strings and byte strings are
+  preserved too. Nested block comments are now removed completely, avoiding
+  findings from text that Rust treats as a comment.
+
 ## [3.5.0] — 2026-08-30
 
 Closes the gaps 3.4.0 left open in its own PROGRESS notes. One of the four

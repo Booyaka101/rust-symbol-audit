@@ -75,8 +75,11 @@ outputs:
     description: "Count of known RustSec/OSV advisories found across audited crates."
     value: ${{ steps.audit.outputs.advisories }}
   recommendation:
-    description: "auto-merge (overall tier none) or review — useful for gating Dependabot auto-merge."
+    description: "auto-merge (tier none and complete inspection) or review."
     value: ${{ steps.audit.outputs.recommendation }}
+  complete:
+    description: "Whether all non-ignored changes received build, symbol and source inspection within the configured caps. Does not attest network availability."
+    value: ${{ steps.audit.outputs.complete }}
   report:
     description: "Path to the machine-readable audit-report.json evidence file."
     value: ${{ steps.audit.outputs.report }}
@@ -150,7 +153,7 @@ runs:
         "${{ github.action_path }}/scripts/run_audit.sh"
 
     - name: Upload audit evidence report
-      if: steps.parse.outputs.changed == 'true' && steps.audit.outputs.report != ''
+      if: always() && steps.parse.outputs.changed == 'true' && steps.audit.outputs.report != ''
       uses: actions/upload-artifact@v7
       with:
         name: rust-symbol-audit-report
