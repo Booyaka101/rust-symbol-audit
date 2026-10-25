@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Invalid allow or review regexes no longer erase findings. Findings are
+  retained, the audit is marked incomplete, and the recommendation is `review`.
+  A malformed rule cannot bypass `fail-on` for a detected risk.
+- Malformed config, review-ledger and cargo-vet TOML is no longer retried with a
+  permissive parser. Partial sign-offs are discarded and parse errors require
+  review, with diagnostics saved in the audit work directory's `config.log`.
+- Reusing an audit work directory no longer carries disabled advisory or
+  provenance findings, or old publish ages, into the current evidence report.
+
 ## [3.6.0] - 2026-10-24
 
 ### Fixed

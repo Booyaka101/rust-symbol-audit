@@ -29,7 +29,10 @@ The suite also runs the Python scanner and pipeline regressions. Run those alone
 with `python3 -m unittest discover -s test -p 'test_*.py'`. They exercise literal
 and nested-comment handling, lockfile additions and parallel versions, Cargo
 build-script rules, incomplete audit recommendations, evidence isolation, and
-artifact identity. Pipeline tests use the local fixture crates and toolchain.
+artifact identity. Suppression regressions cover malformed config/ledger/vet
+TOML, invalid regexes (including empty finding sets), preserved `fail-on` gates,
+intentional valid suppressions, and reruns with disabled registry lanes.
+Pipeline tests use the local fixture crates and toolchain.
 
 ### What each test proves
 | Test | Proves | Acceptance |

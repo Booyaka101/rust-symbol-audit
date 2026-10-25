@@ -104,6 +104,84 @@ class PipelineTests(unittest.TestCase):
         body = (self.work / 'run/comment_body.md').read_text(encoding='utf-8')
         self.assertIn('INCOMPLETE', body)
 
+    def test_invalid_allow_regex_preserves_findings(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = ["["]\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+        self.assertEqual(report['recommendation'], 'review')
+
+    def test_invalid_review_regex_preserves_findings(self):
+        reviews = self.work / 'reviews.toml'
+        reviews.write_text('[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = ["["]\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', REVIEWS=reviews.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+
+    def test_invalid_toml_cannot_create_a_signoff(self):
+        reviews = self.work / 'reviews.toml'
+        reviews.write_text('[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = [\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', REVIEWS=reviews.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+        self.assertFalse(report['crates'][0]['reviewed'])
+
+    def test_invalid_toml_config_does_not_ignore_crates(self):
+        config = self.work / 'config.toml'
+        config.write_text('ignore_crates = ["netcap"]\nbroken = [\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+
+    def test_invalid_vet_file_does_not_import_partial_signoffs(self):
+        audits = self.work / 'audits.toml'
+        audits.write_text('[[audits.netcap]]\nversion = "0.2.0"\ncriteria = "safe-to-deploy"\n'
+                          '[[audits.netcap]]\nversion = "0.2.0"\ncriteria = [\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', VET_AUDITS=audits.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+        self.assertFalse(report['crates'][0]['reviewed'])
+
+    def test_bad_rules_require_review_even_without_risky_changes(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = ["["]\n')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertFalse(report['complete'])
+        self.assertEqual(report['recommendation'], 'review')
+        self.assertTrue(any('invalid regex' in r for r in report['incomplete_reasons']))
+
+    def test_invalid_allow_cannot_bypass_fail_on(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = ["["]\n')
+        with self.assertRaises(subprocess.CalledProcessError) as caught:
+            self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix(), FAIL_ON='critical')
+        self.assertEqual(caught.exception.returncode, 1)
+        report = json.loads((self.work / 'run/audit-report.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertEqual(report['recommendation'], 'review')
+
+    def test_valid_regex_can_suppress_all_matches_without_error(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = [".*"]\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertTrue(report['complete'])
+        self.assertEqual(report['recommendation'], 'auto-merge')
+
+    def test_rerun_does_not_reuse_disabled_lane_evidence(self):
+        self.audit('netcap\t0.1.0\t0.1.0\n')
+        cdir = self.work / 'run/crates/netcap'
+        (cdir / 'advisory.filtered').write_text('critical\tadvisory\tstale advisory\n')
+        (cdir / 'provenance.filtered').write_text('high\tpublisher-change\tstale publisher\n')
+        (cdir / 'publish_age.txt').write_text('4 minutes ago')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n')
+        self.assertEqual(report['crates'][0]['advisories'], [])
+        self.assertEqual(report['crates'][0]['provenance'], [])
+        body = (self.work / 'run/comment_body.md').read_text(encoding='utf-8')
+        self.assertNotIn('4 minutes ago', body)
+
     def test_failed_symbol_tool_never_recommends_auto_merge(self):
         report = self.audit('netcap\t0.1.0\t0.1.0\n', NM='false')
         self.assertEqual(report['recommendation'], 'review')

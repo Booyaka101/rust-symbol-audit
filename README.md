@@ -238,6 +238,12 @@ reqwest = ["TcpStream", "hyper", "rustls"]  # suppress these findings for this c
 at a time (and still surfaces future advisories). Use `allow` for "this crate is
 allowed this capability always", the ledger for "I reviewed exactly this version".
 
+Invalid TOML or invalid allow/review regexes never count as approval. The audit
+preserves unsuppressed findings, sets `complete=false`, and recommends `review`.
+The report's `incomplete_reasons` describes the problem; `config.log` in the
+audit work directory contains parser and regex diagnostics. A valid rule that
+matches every finding still works as an intentional suppression.
+
 ### Compliance / SLSA evidence
 
 Every run writes `audit-report.json` (overall verdict + every finding, per crate
