@@ -46,6 +46,7 @@ SECTIONS="$WORK/sections.md"; : > "$SECTIONS"
 : > "$WORK/evidence.jsonl" 2>/dev/null || true
 : > "$WORK/incomplete.txt"
 : > "$WORK/audited.list"
+: > "$WORK/config.log"
 incomplete() {
   log "run_audit: incomplete: $*"
   printf '%s\n' "$*" >> "$WORK/incomplete.txt"
@@ -59,30 +60,55 @@ fi
 # --- config (ignore/allow) -------------------------------------------------
 CONFIG_NORM="$WORK/config.norm"; : > "$CONFIG_NORM"
 if [ -f "$RSA_CONFIG" ]; then
-  python3 "$HERE/read_config.py" "$RSA_CONFIG" > "$CONFIG_NORM" 2>/dev/null || : > "$CONFIG_NORM"
+  if ! python3 "$HERE/read_config.py" "$RSA_CONFIG" > "$CONFIG_NORM" 2>>"$WORK/config.log"; then
+    : > "$CONFIG_NORM"
+    incomplete "could not parse config $RSA_CONFIG; no config suppressions applied"
+  fi
   log "run_audit: config $RSA_CONFIG -> $(count_lines "$CONFIG_NORM") rule(s)"
 fi
 # --- review ledger + cargo-vet import --------------------------------------
 REVIEWS_NORM="$WORK/reviews.norm"; : > "$REVIEWS_NORM"
 if [ -f "$REVIEWS" ]; then
-  python3 "$HERE/read_reviews.py" "$REVIEWS" > "$REVIEWS_NORM" 2>/dev/null || : > "$REVIEWS_NORM"
+  if ! python3 "$HERE/read_reviews.py" "$REVIEWS" > "$REVIEWS_NORM" 2>>"$WORK/config.log"; then
+    : > "$REVIEWS_NORM"
+    incomplete "could not parse review ledger $REVIEWS; no ledger suppressions applied"
+  fi
   log "run_audit: ledger $REVIEWS -> $(count_lines "$REVIEWS_NORM") sign-off(s)"
 fi
 # cargo-vet interop: treat existing supply-chain/audits.toml certifications as
 # sign-offs too (appended to the same normalized ledger).
 VET_AUDITS="${VET_AUDITS:-supply-chain/audits.toml}"
 if [ -f "$VET_AUDITS" ]; then
-  python3 "$HERE/read_vet.py" "$VET_AUDITS" >> "$REVIEWS_NORM" 2>/dev/null || true
+  if python3 "$HERE/read_vet.py" "$VET_AUDITS" > "$WORK/vet.norm" 2>>"$WORK/config.log"; then
+    cat "$WORK/vet.norm" >> "$REVIEWS_NORM"
+  else
+    incomplete "could not parse cargo-vet audits $VET_AUDITS; no cargo-vet suppressions applied"
+  fi
   log "run_audit: + cargo-vet $VET_AUDITS -> $(count_lines "$REVIEWS_NORM") total sign-off(s)"
 fi
 
 is_ignored() { awk -F'\t' -v c="$1" '$1=="IGNORE"&&$2==c{f=1} END{exit !f}' "$CONFIG_NORM"; }
 
+# grep exits 1 for no retained findings, but 2 for an invalid regex. Never turn
+# a rule error into an empty (apparently clean) lane, even with empty input.
+filter_findings() {
+  local rx="$1" f="$2" context="$3" status=0
+  [ -f "$f" ] || return 0
+  grep -viE -- "$rx" "$f" > "$f.filter.tmp" 2>>"$WORK/config.log" || status=$?
+  if [ "$status" -gt 1 ]; then
+    incomplete "$context contains an invalid regex; findings were not suppressed"
+    cat "$f"
+  else
+    cat "$f.filter.tmp"
+  fi
+  rm -f "$f.filter.tmp"
+}
+
 apply_allow() {
   local crate="$1" f="$2" rx
   rx="$(awk -F'\t' -v c="$crate" '$1=="ALLOW"&&$2==c{print $3}' "$CONFIG_NORM" 2>/dev/null | paste -sd'|' -)"
   [ -f "$f" ] || return 0
-  if [ -z "$rx" ]; then cat "$f"; else grep -viE "$rx" "$f" || true; fi
+  if [ -z "$rx" ]; then cat "$f"; else filter_findings "$rx" "$f" "allow rules for $crate"; fi
 }
 
 md_cell() { printf '%s' "$1" | sed 's/|/\\|/g'; }
@@ -163,6 +189,13 @@ while IFS= read -r _line || [ -n "$_line" ]; do
     CDIR="$WORK/crates/$name-$newv"; mkdir -p "$CDIR"
   fi
   printf '%s\n' "$CDIR" >> "$WORK/audited.list"
+  # Optional lanes may be disabled on a subsequent run using the same WORK.
+  # Clear their cached rendering/evidence before deciding which lanes to run.
+  : > "$CDIR/advisory.filtered"
+  : > "$CDIR/provenance.filtered"
+  : > "$CDIR/publish_age.txt"
+  printf 'disabled\n' > "$CDIR/advisory_status.txt"
+  printf 'disabled\n' > "$CDIR/provenance_status.txt"
   log "=== auditing $name : ${oldv:-<new>} -> $newv ==="
 
   OLD_RLIB=""; OLD_ERR=""
@@ -289,7 +322,8 @@ while IFS= read -r _line || [ -n "$_line" ]; do
     local f="$1"; [ -f "$f" ] || return 0
     if [ "$FULLY_REVIEWED" -eq 1 ]; then : > "$f"
     elif [ -n "$LEDGER_RX" ]; then
-      grep -viE "$LEDGER_RX" "$f" > "$f.tmp" 2>/dev/null || true; mv "$f.tmp" "$f"
+      filter_findings "$LEDGER_RX" "$f" "review patterns for $name $newv" > "$f.tmp"
+      mv "$f.tmp" "$f"
     fi
   }
   HAD_CAP=0
@@ -309,7 +343,11 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   [ -n "${RSA_FIXTURES:-}" ] && [ -d "${RSA_FIXTURES}/${name}-${newv}" ] && is_fixture=1
   PROV_TSV_F="$CDIR/provenance_findings.tsv"; : > "$PROV_TSV_F"; PROV_TIER="none"
   if [ "${RSA_CHECK_PROVENANCE:-1}" != "0" ] && { [ "$is_fixture" -eq 0 ] || [ -n "${RSA_CRATESIO_FIXTURE:-}" ]; }; then
-    "$HERE/provenance.sh" "$name" "${oldv:-}" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
+    "$HERE/provenance.sh" "$name" "${oldv:-}" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" \
+      || incomplete "$name $newv provenance check failed"
+    if [ "$(cat "$CDIR/provenance_status.txt")" != checked ]; then
+      incomplete "$name $newv requested provenance check unavailable"
+    fi
     apply_allow "$name" "$CDIR/provenance_findings.tsv" > "$CDIR/provenance.filtered" 2>/dev/null || true
     PROV_TSV_F="$CDIR/provenance.filtered"; PROV_TIER="$(max_tier "$PROV_TSV_F")"
   fi
@@ -317,7 +355,11 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   [ -s "$CDIR/publish_age.txt" ] && PUB_AGE="$(cat "$CDIR/publish_age.txt")"
   ADV_TSV_F="$CDIR/advisory_findings.tsv"; : > "$ADV_TSV_F"; ADV_TIER="none"
   if [ "${RSA_CHECK_ADVISORIES:-1}" != "0" ] && { [ "$is_fixture" -eq 0 ] || [ -n "${RSA_ADVISORY_FIXTURE:-}" ]; }; then
-    "$HERE/advisories.sh" "$name" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
+    "$HERE/advisories.sh" "$name" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" \
+      || incomplete "$name $newv advisory check failed"
+    if [ "$(cat "$CDIR/advisory_status.txt")" != checked ]; then
+      incomplete "$name $newv requested advisory check unavailable"
+    fi
     apply_allow "$name" "$CDIR/advisory_findings.tsv" > "$CDIR/advisory.filtered" 2>/dev/null || true
     ADV_TSV_F="$CDIR/advisory.filtered"; ADV_TIER="$(max_tier "$ADV_TSV_F")"
     ADVISORY_COUNT=$((ADVISORY_COUNT + $(count_lines "$ADV_TSV_F")))

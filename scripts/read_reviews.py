@@ -106,7 +106,7 @@ def main():
     try:
         try:
             data = _load_tomllib(path)
-        except Exception:
+        except ImportError:
             data = _minimal_parse(path)
     except FileNotFoundError:
         return 0

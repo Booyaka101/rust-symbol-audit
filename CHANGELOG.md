@@ -4,7 +4,29 @@ All notable changes to **rust-symbol-audit** are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.6.1] - 2026-10-25
+
+### Fixed
+
+- Invalid allow or review regexes no longer erase findings. Findings are
+  retained, the audit is marked incomplete, and the recommendation is `review`.
+  A malformed rule cannot bypass `fail-on` for a detected risk.
+- Malformed config, review-ledger and cargo-vet TOML is no longer retried with a
+  permissive parser. Partial sign-offs are discarded and parse errors require
+  review, with diagnostics saved in the audit work directory's `config.log`.
+- Reusing an audit work directory no longer carries disabled advisory or
+  provenance findings, or old publish ages, into the current evidence report.
+- Cargo-vet imports require safety criteria and a full audit root for delta
+  chains. License-only audits and unrooted deltas no longer approve a version;
+  crates with violation entries are conservatively excluded from import.
+- Malformed registry responses and HTTP errors are no longer treated as clean
+  advisory checks or proof of registry removal. Enabled but unavailable checks
+  require review without inventing a risk tier. Withdrawn OSV advisories are
+  ignored. Per-crate JSON now includes explicit registry-check status.
+- Sticky comments select one newest comment across all pages and verify its
+  author, rather than matching reports copied by other users.
+- The review helper escapes quotes, backslashes and multiline notes, refuses
+  malformed ledgers, and distinguishes partial from whole-version sign-offs.
 
 ## [3.6.0] - 2026-10-24
 

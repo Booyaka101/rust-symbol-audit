@@ -35,12 +35,20 @@ def crate_record(cdir):
     if not meta:
         return None
     name, old, new, tier, reviewed = meta
+    def status(lane):
+        try:
+            with open(os.path.join(cdir, lane + '_status.txt'), encoding='utf-8') as fh:
+                return fh.read().strip()
+        except FileNotFoundError:
+            return 'unavailable'
+
     rec = {
         "crate": name,
         "old": old or None,
         "new": new,
         "tier": tier or "none",
         "reviewed": reviewed == "1",
+        "registry_checks": {lane: status(lane) for lane in ('advisory', 'provenance')},
         "advisories": [{"tier": t, "detail": d}
                        for (t, _k, d) in read_cols(os.path.join(cdir, "advisory.filtered"), 3)],
         "provenance": [{"tier": t, "kind": k, "detail": d}

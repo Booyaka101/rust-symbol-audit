@@ -29,13 +29,14 @@ TSV="$OUTDIR/advisory_findings.tsv"
 JSON="$OUTDIR/advisories.json"
 RAW="$OUTDIR/osv.json"
 : > "$TSV"
+printf 'unavailable\n' > "$OUTDIR/advisory_status.txt"
 
 got=0
 if [ -n "${RSA_ADVISORY_FIXTURE:-}" ] && [ -f "${RSA_ADVISORY_FIXTURE}/${CRATE}-${VERSION}.json" ]; then
   cp "${RSA_ADVISORY_FIXTURE}/${CRATE}-${VERSION}.json" "$RAW" && got=1
 elif [ "${RSA_CHECK_ADVISORIES:-1}" = "1" ] && [ -n "$VERSION" ] && command -v curl >/dev/null 2>&1; then
   body="$(printf '{"version":"%s","package":{"ecosystem":"crates.io","name":"%s"}}' "$VERSION" "$CRATE")"
-  if curl -sS -m 20 -A "rust-symbol-audit (github action)" -H "Content-Type: application/json" \
+  if curl -fsS -m 20 -A "rust-symbol-audit (github action)" -H "Content-Type: application/json" \
         -X POST -d "$body" "https://api.osv.dev/v1/query" -o "$RAW" 2>/dev/null \
      && [ -s "$RAW" ]; then
     got=1
@@ -48,12 +49,10 @@ if [ "$got" -ne 1 ]; then
   cat "$JSON"; exit 0
 fi
 
-python3 - "$RAW" >> "$TSV" <<'PY'
+PYTHONPATH="$HERE" python3 - "$RAW" >> "$TSV" <<'PY'
 import json, sys
-try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    sys.exit(0)
+from registry_data import osv
+data = osv(sys.argv[1])
 
 def cvss_score(v):
     best = 0.0
@@ -71,6 +70,8 @@ def ids_of(v):
 # so the same advisory isn't listed twice.
 groups, seen = [], {}
 for v in (data.get("vulns") or []):
+    if v.get('withdrawn'):
+        continue
     idset = set(ids_of(v))
     gi = next((seen[i] for i in idset if i in seen), None)
     if gi is None:
@@ -106,6 +107,7 @@ for g in groups:
     alias_str = " (aka %s)" % ", ".join(aliases) if aliases else ""
     print("%s\tadvisory\t[%s](%s)%s — %s" % (tier, primary, url_for(primary), alias_str, summ))
 PY
+printf 'checked\n' > "$OUTDIR/advisory_status.txt"
 
 overall="$(max_tier "$TSV")"
 

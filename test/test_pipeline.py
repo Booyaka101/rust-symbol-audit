@@ -104,6 +104,161 @@ class PipelineTests(unittest.TestCase):
         body = (self.work / 'run/comment_body.md').read_text(encoding='utf-8')
         self.assertIn('INCOMPLETE', body)
 
+    def test_invalid_allow_regex_preserves_findings(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = ["["]\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+        self.assertEqual(report['recommendation'], 'review')
+
+    def test_invalid_review_regex_preserves_findings(self):
+        reviews = self.work / 'reviews.toml'
+        reviews.write_text('[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = ["["]\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', REVIEWS=reviews.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+
+    def test_invalid_toml_cannot_create_a_signoff(self):
+        reviews = self.work / 'reviews.toml'
+        reviews.write_text('[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = [\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', REVIEWS=reviews.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+        self.assertFalse(report['crates'][0]['reviewed'])
+
+    def test_invalid_toml_config_does_not_ignore_crates(self):
+        config = self.work / 'config.toml'
+        config.write_text('ignore_crates = ["netcap"]\nbroken = [\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+
+    def test_invalid_vet_file_does_not_import_partial_signoffs(self):
+        audits = self.work / 'audits.toml'
+        audits.write_text('[[audits.netcap]]\nversion = "0.2.0"\ncriteria = "safe-to-deploy"\n'
+                          '[[audits.netcap]]\nversion = "0.2.0"\ncriteria = [\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', VET_AUDITS=audits.as_posix())
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertFalse(report['complete'])
+        self.assertFalse(report['crates'][0]['reviewed'])
+
+    def test_bad_rules_require_review_even_without_risky_changes(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = ["["]\n')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertFalse(report['complete'])
+        self.assertEqual(report['recommendation'], 'review')
+        self.assertTrue(any('invalid regex' in r for r in report['incomplete_reasons']))
+
+    def test_invalid_allow_cannot_bypass_fail_on(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = ["["]\n')
+        with self.assertRaises(subprocess.CalledProcessError) as caught:
+            self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix(), FAIL_ON='critical')
+        self.assertEqual(caught.exception.returncode, 1)
+        report = json.loads((self.work / 'run/audit-report.json').read_text(encoding='utf-8'))
+        self.assertEqual(report['overall_tier'], 'critical')
+        self.assertEqual(report['recommendation'], 'review')
+
+    def test_valid_regex_can_suppress_all_matches_without_error(self):
+        config = self.work / 'config.toml'
+        config.write_text('[allow]\nnetcap = [".*"]\n')
+        report = self.audit('netcap\t0.1.0\t0.2.0\n', RSA_CONFIG=config.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertTrue(report['complete'])
+        self.assertEqual(report['recommendation'], 'auto-merge')
+
+    def test_rerun_does_not_reuse_disabled_lane_evidence(self):
+        self.audit('netcap\t0.1.0\t0.1.0\n')
+        cdir = self.work / 'run/crates/netcap'
+        (cdir / 'advisory.filtered').write_text('critical\tadvisory\tstale advisory\n')
+        (cdir / 'provenance.filtered').write_text('high\tpublisher-change\tstale publisher\n')
+        (cdir / 'publish_age.txt').write_text('4 minutes ago')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n')
+        self.assertEqual(report['crates'][0]['advisories'], [])
+        self.assertEqual(report['crates'][0]['provenance'], [])
+        body = (self.work / 'run/comment_body.md').read_text(encoding='utf-8')
+        self.assertNotIn('4 minutes ago', body)
+
+    def test_malformed_advisory_response_requires_review(self):
+        fixture = self.work / 'osv'
+        fixture.mkdir()
+        (fixture / 'netcap-0.1.0.json').write_text('{broken')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CHECK_ADVISORIES='1',
+                            RSA_ADVISORY_FIXTURE=fixture.as_posix())
+        self.assertEqual(report['recommendation'], 'review')
+        self.assertFalse(report['complete'])
+
+    def test_registry_error_response_is_not_a_missing_version(self):
+        fixture = self.work / 'registry'
+        fixture.mkdir()
+        (fixture / 'netcap.json').write_text('{"errors":[{"detail":"server error"}]}')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CHECK_PROVENANCE='1',
+                            RSA_CRATESIO_FIXTURE=fixture.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertFalse(report['complete'])
+
+    def test_withdrawn_advisories_are_not_findings(self):
+        fixture = self.work / 'osv'
+        fixture.mkdir()
+        (fixture / 'netcap-0.1.0.json').write_text(json.dumps({'vulns': [
+            {'id': 'RUSTSEC-2099-0001', 'withdrawn': '2025-01-01T00:00:00Z'}]}))
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CHECK_ADVISORIES='1',
+                            RSA_ADVISORY_FIXTURE=fixture.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertEqual(report['crates'][0]['advisories'], [])
+
+    def test_review_cli_escapes_user_text(self):
+        import tomllib
+        ledger = self.work / 'reviews.toml'
+        who = 'Alice "Reviewer"'
+        notes = 'Windows path C:\\tools\nSecond line with "quotes"'
+        self.bash(ROOT / 'scripts/review.sh', 'netcap', '0.2.0', who, notes,
+                  env={'REVIEWS': ledger.as_posix()})
+        review = tomllib.loads(ledger.read_text(encoding='utf-8'))['review'][0]
+        self.assertEqual(review['reviewed_by'], who)
+        self.assertEqual(review['notes'], notes)
+
+    def test_review_cli_upgrades_partial_signoff(self):
+        import tomllib
+        ledger = self.work / 'reviews.toml'
+        ledger.write_text('[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = ["TcpStream"]\n')
+        self.bash(ROOT / 'scripts/review.sh', 'netcap', '0.2.0',
+                  env={'REVIEWS': ledger.as_posix()})
+        reviews = tomllib.loads(ledger.read_text(encoding='utf-8'))['review']
+        self.assertEqual(len(reviews), 2)
+        self.assertNotIn('accept', reviews[-1])
+
+    def test_review_cli_refuses_to_append_to_malformed_ledger(self):
+        ledger = self.work / 'reviews.toml'
+        text = '[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = [\n'
+        ledger.write_text(text)
+        result = self.bash(ROOT / 'scripts/review.sh', 'netcap', '0.2.0',
+                           env={'REVIEWS': ledger.as_posix()}, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(ledger.read_text(), text)
+
+    def test_sticky_post_uses_paginated_owned_comment_with_mock_gh(self):
+        shim = self.work / 'gh'
+        shim.write_text('''#!/usr/bin/env bash
+if [ "$1 $2" = "api user" ]; then echo 'github-actions[bot]'; exit 0; fi
+if [ "$2" = "repos/example/test/issues/7/comments" ]; then
+  [ "$3 $4" = "--paginate --slurp" ] || exit 9
+  printf '%s\\n' '[[{"id":10,"body":"<!-- rust-symbol-audit -->","user":{"login":"github-actions[bot]"}}],[{"id":30,"body":"<!-- rust-symbol-audit -->","user":{"login":"github-actions[bot]"}},{"id":40,"body":"<!-- rust-symbol-audit -->","user":{"login":"someone-else"}}]]'
+  exit 0
+fi
+if [ "$2 $3" = "--method PATCH" ]; then printf '%s' "$4" > "$WORK/patched.txt"; exit 0; fi
+exit 9
+''', encoding='utf-8', newline='\n')
+        shim.chmod(0o755)
+        self.bash('-c', 'dir="$1"; command -v cygpath >/dev/null && dir="$(cygpath -u "$dir")"; export PATH="$dir:$PATH"; test "$(command -v gh)" = "$dir/gh" || exit 5; bash "$2"',
+                  'test', self.work.as_posix(), (ROOT / 'scripts/post_comment.sh').as_posix(),
+                  env={'WORK': self.work.as_posix(), 'GITHUB_REPOSITORY': 'example/test',
+                       'PR_NUMBER': '7', 'RSA_DRY_RUN': '0', 'RSA_COMMENT': 'true'})
+        self.assertEqual((self.work / 'patched.txt').read_text(), 'repos/example/test/issues/comments/30')
+
     def test_failed_symbol_tool_never_recommends_auto_merge(self):
         report = self.audit('netcap\t0.1.0\t0.1.0\n', NM='false')
         self.assertEqual(report['recommendation'], 'review')

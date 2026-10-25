@@ -78,7 +78,7 @@ outputs:
     description: "auto-merge (tier none and complete inspection) or review."
     value: ${{ steps.audit.outputs.recommendation }}
   complete:
-    description: "Whether all non-ignored changes received build, symbol and source inspection within the configured caps. Does not attest network availability."
+    description: "Whether all non-ignored changes received build, symbol, source and enabled registry checks within the configured caps. Not a guarantee of detection completeness."
     value: ${{ steps.audit.outputs.complete }}
   report:
     description: "Path to the machine-readable audit-report.json evidence file."

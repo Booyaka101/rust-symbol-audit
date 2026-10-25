@@ -40,6 +40,7 @@ TSV="$OUTDIR/provenance_findings.tsv"
 JSON="$OUTDIR/provenance.json"
 RAW="$OUTDIR/cratesio.json"
 : > "$TSV"
+printf 'unavailable\n' > "$OUTDIR/provenance_status.txt"
 rm -f "$OUTDIR/publish_age.txt"
 
 # --- obtain crates.io metadata (mock, else network) ---
@@ -47,7 +48,7 @@ got=0
 if [ -n "${RSA_CRATESIO_FIXTURE:-}" ] && [ -f "${RSA_CRATESIO_FIXTURE}/${CRATE}.json" ]; then
   cp "${RSA_CRATESIO_FIXTURE}/${CRATE}.json" "$RAW" && got=1
 elif [ "${RSA_CHECK_PROVENANCE:-1}" = "1" ] && command -v curl >/dev/null 2>&1; then
-  if curl -sS -m 20 -A "rust-symbol-audit (github action)" \
+  if curl -fsS -m 20 -A "rust-symbol-audit (github action)" \
         "https://crates.io/api/v1/crates/${CRATE}" -o "$RAW" 2>/dev/null \
      && [ -s "$RAW" ]; then
     got=1
@@ -61,10 +62,11 @@ if [ "$got" -ne 1 ]; then
   cat "$JSON"; exit 0
 fi
 
-OLDV="$OLDV" NEWV="$NEWV" OUTDIR="$OUTDIR" PYTHONPATH="$HERE" python3 - "$RAW" >> "$TSV" <<'PY'
+CRATE="$CRATE" OLDV="$OLDV" NEWV="$NEWV" OUTDIR="$OUTDIR" PYTHONPATH="$HERE" python3 - "$RAW" >> "$TSV" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
 from agefmt import rel_age
+from registry_data import cratesio
 oldv = os.environ.get("OLDV", "")
 newv = os.environ.get("NEWV", "")
 outdir = os.environ.get("OUTDIR", ".")
@@ -72,10 +74,7 @@ try:
     min_age_h = float(os.environ.get("RSA_MIN_PUBLISH_AGE_HOURS", "24"))
 except ValueError:
     min_age_h = 24.0
-try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    sys.exit(0)
+data = cratesio(sys.argv[1], os.environ['CRATE'])
 
 crate = data.get("crate", {}) or {}
 versions = data.get("versions", []) or []
@@ -152,6 +151,7 @@ elif np and not opb and oldv:
 for tier, kind, detail in out:
     print("%s\t%s\t%s" % (tier, kind, detail))
 PY
+printf 'checked\n' > "$OUTDIR/provenance_status.txt"
 
 # --- overall tier + json ---
 overall="$(max_tier "$TSV")"

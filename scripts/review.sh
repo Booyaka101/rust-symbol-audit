@@ -18,28 +18,29 @@ BY="${3:-${USER:-unknown}}"
 NOTES="${4:-}"
 LEDGER="${REVIEWS:-.rust-symbol-audit/reviews.toml}"
 
-mkdir -p "$(dirname "$LEDGER")"
-[ -f "$LEDGER" ] || {
-  printf '# rust-symbol-audit review ledger — capability sign-offs.\n' > "$LEDGER"
-  printf '# Future bumps only alarm on the unreviewed delta. See README.\n\n' >> "$LEDGER"
-}
+# JSON's escaped strings are also TOML basic strings. Validate the existing
+# document before appending, and only a whole-version review is a no-op.
+python3 - "$LEDGER" "$CRATE" "$VERSION" "$BY" "$NOTES" <<'PY'
+from datetime import date
+import json
+from pathlib import Path
+import sys
+import tomllib
 
-# Already signed off? (exact crate+version ALL entry)
-if python3 "$HERE/read_reviews.py" "$LEDGER" 2>/dev/null \
-    | awk -F'\t' -v c="$CRATE" -v v="$VERSION" '$2==c && $3==v {f=1} END{exit !f}'; then
-  log "review: $CRATE $VERSION is already in the ledger — nothing to do"
-  exit 0
-fi
-
-DATE="$(date +%F 2>/dev/null || echo '')"
-{
-  printf '[[review]]\n'
-  printf 'crate = "%s"\n' "$CRATE"
-  printf 'version = "%s"\n' "$VERSION"
-  printf 'reviewed_by = "%s"\n' "$BY"
-  [ -n "$DATE" ] && printf 'date = "%s"\n' "$DATE"
-  printf 'notes = "%s"\n' "$NOTES"
-  printf '\n'
-} >> "$LEDGER"
-
-log "review: signed off $CRATE $VERSION (by $BY) in $LEDGER"
+ledger = Path(sys.argv[1])
+crate, version, who, notes = sys.argv[2:]
+text = ledger.read_text(encoding='utf-8') if ledger.exists() else ''
+data = tomllib.loads(text)
+if any(r.get('crate') == crate and r.get('version') == version and not r.get('accept')
+       for r in data.get('review', [])):
+    print('review: already signed off %s %s' % (crate, version), file=sys.stderr)
+    sys.exit(0)
+entry = dict(crate=crate, version=version, reviewed_by=who, date=date.today().isoformat(), notes=notes)
+block = '\n[[review]]\n' + ''.join('%s = %s\n' % (k, json.dumps(v, ensure_ascii=False))
+                                      for k, v in entry.items()) + '\n'
+tomllib.loads(text + block)
+ledger.parent.mkdir(parents=True, exist_ok=True)
+with ledger.open('a', encoding='utf-8', newline='\n') as fh:
+    fh.write(block)
+print('review: signed off %s %s in %s' % (crate, version, ledger), file=sys.stderr)
+PY
