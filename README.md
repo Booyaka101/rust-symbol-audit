@@ -114,7 +114,12 @@ paste. Crucially, a sign-off suppresses **only** the capability lanes — a late
 Already using [**cargo-vet**](https://mozilla.github.io/cargo-vet/)? Its
 `supply-chain/audits.toml` certifications are imported automatically as sign-offs
 (configurable via the `vet` input), so versions your team already vetted stay
-green with no extra work.
+green with no extra work. Only `safe-to-run` / `safe-to-deploy` audits (or custom
+criteria that imply them) qualify. Delta audits must be reachable from a full
+safety audit through safety-preserving deltas. License-only audits and unrooted
+deltas do not approve a version. Crates with violation entries are conservatively
+excluded from import; this helper does not replace `cargo vet check`, resolve
+dependency-specific criteria, or import publisher-range trust.
 
 > **What this is — and isn't.** A *triage gate*, not a sandbox or a proof. It
 > reliably surfaces the realistic "this dependency's surface changed — look" case
@@ -215,13 +220,17 @@ not isolate them from other environment variables, files, or runner credentials.
 | `build-script-changes` | Count of crates whose build script was added/changed. |
 | `advisories` | Count of known RustSec/OSV advisories found. |
 | `recommendation` | `auto-merge` (tier none and complete inspection) or `review`. Capped or failed inspection always requires review, without changing risk tiers. |
-| `complete` | `true` when all non-ignored changes received build, symbol and source inspection within the caps; otherwise `false`. Does not attest network availability or detection completeness. |
+| `complete` | `true` when all non-ignored changes received build, symbol, source and enabled registry checks within the caps; otherwise `false`. Not a guarantee of detection completeness. |
 | `report` | Path to the machine-readable `audit-report.json` evidence file. |
 
 The JSON report includes `complete` and `incomplete_reasons`. Evidence is uploaded
 even when `fail-on` makes the audit step fail. Explicitly ignored crates do not
-make an audit incomplete. Network lanes still degrade gracefully offline; a
-complete report is not a guarantee that advisory or provenance data was available.
+make an audit incomplete. Disabled registry lanes are intentionally excluded from
+coverage requirements. An enabled lane that is unavailable or returns malformed
+data now requires review rather than recommending auto-merge. It does not invent
+a risk tier or make `fail-on` fail without a detected finding. Each crate's JSON
+`registry_checks` records `checked`, `disabled`, or `unavailable` separately for
+advisories and provenance. Test fixtures without registry data skip these lanes.
 
 ### Suppressing false positives — `.rust-symbol-audit.toml`
 
@@ -301,7 +310,8 @@ fetch, and it is correctly a note, not an alarm.
 instantiated in the crate's own rlib, or via an unchanged dependency; runtime
 behavior (it reads surface, doesn't sandbox); crates that can't build standalone
 (symbol lane only — other lanes still apply); network lanes need connectivity and
-degrade gracefully offline. Tune noise with the config + ledger.
+retain other findings offline but require review when enabled data is unavailable.
+Tune noise with the config + ledger.
 
 ## Best first distribution step
 

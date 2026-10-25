@@ -34,6 +34,11 @@ TOML, invalid regexes (including empty finding sets), preserved `fail-on` gates,
 intentional valid suppressions, and reruns with disabled registry lanes.
 Pipeline tests use the local fixture crates and toolchain.
 
+The deeper review cases cover rooted cargo-vet delta chains and criteria,
+violation exclusions, malformed registry data and withdrawn advisories,
+review-helper string round trips, and paginated author-scoped sticky comments.
+These tests do not post a live GitHub comment.
+
 ### What each test proves
 | Test | Proves | Acceptance |
 |---|---|---|

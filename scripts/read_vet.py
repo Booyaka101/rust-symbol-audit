@@ -14,7 +14,7 @@ cargo-vet shape:
     who = "Alice <alice@example.com>"
 
     [[audits.foo]]
-    delta = "1.0.0 -> 1.0.1"     # a reviewed change; the *target* is certified
+    delta = "1.0.0 -> 1.0.1"     # preserves safety only if the base is certified
     criteria = ["safe-to-run"]
 
 Emits the same normalized lines as read_reviews.py (so run_audit treats them
@@ -22,9 +22,10 @@ identically):
 
     REVIEW<TAB><crate><TAB><version><TAB>ALL<TAB>vet:<who|criteria>
 
-Only `[[audits.<crate>]]` entries are imported; `wildcard-audits` / `trusted`
-(publisher-range trust, not a specific version) are intentionally ignored.
-Prefers stdlib `tomllib` (>=3.11); minimal fallback handles the shape above.
+Only safety-certified versions reachable from a full safety audit are imported.
+Custom criteria may imply safe-to-run/deploy. Crates with violation entries are
+conservatively excluded; this is not a replacement for cargo-vet's resolver.
+Wildcard audits and publisher trust are intentionally ignored. Python 3.11+.
 """
 import sys
 
@@ -35,48 +36,51 @@ def _load_tomllib(path):
         return tomllib.load(fh)
 
 
-def _strip_comment(line):
-    out, in_str = [], False
-    for ch in line:
-        if ch == '"':
-            in_str = not in_str
-        elif ch == "#" and not in_str:
-            break
-        out.append(ch)
-    return "".join(out)
+def _criteria(value):
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return list(value)
+    return []
 
 
-def _minimal_parse(path):
-    """Handle a sequence of `[[audits.<crate>]]` blocks with key = value lines."""
-    audits = {}
-    cur = None
-    with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = _strip_comment(raw).strip()
-            if not line:
-                continue
-            if line.startswith("[[audits.") and line.endswith("]]"):
-                name = line[len("[[audits."):-2].strip().strip('"')
-                cur = {}
-                audits.setdefault(name, []).append(cur)
-            elif line.startswith("[") or line.startswith("[["):
-                cur = None            # some other table/array — ignore
-            elif "=" in line and cur is not None:
-                k, _, v = line.partition("=")
-                cur[k.strip()] = v.strip().strip('"').strip("'")
-    return {"audits": audits}
+def certified_versions(entries, definitions):
+    """Follow safety-preserving directed deltas from fully audited versions."""
+    if any('violation' in e for e in entries):
+        return {}
 
+    def safe(value):
+        pending = _criteria(value)
+        seen = set()
+        while pending:
+            criterion = pending.pop()
+            if criterion in ('safe-to-run', 'safe-to-deploy'):
+                return True
+            if criterion not in seen:
+                seen.add(criterion)
+                pending.extend(_criteria(definitions.get(criterion, {}).get('implies')))
+        return False
 
-def _target_version(entry):
-    """The certified version: `version`, or the RHS of a `delta = "a -> b"`."""
-    v = entry.get("version")
-    if v:
-        return str(v).strip()
-    d = entry.get("delta")
-    if d:
-        d = str(d)
-        return d.split("->")[-1].strip() if "->" in d else d.strip()
-    return None
+    certified, deltas = {}, []
+    for entry in entries:
+        if not safe(entry.get('criteria')) or entry.get('dependency-criteria'):
+            continue
+        version = entry.get('version')
+        delta = entry.get('delta')
+        if isinstance(version, str) and version and not delta:
+            certified[version] = entry
+        elif isinstance(delta, str) and delta.count('->') == 1 and not version:
+            base, target = (v.strip() for v in delta.split('->'))
+            if base and target:
+                deltas.append((base, target, entry))
+    changed = True
+    while changed:
+        changed = False
+        for base, target, entry in deltas:
+            if base in certified and target not in certified:
+                certified[target] = entry
+                changed = True
+    return certified
 
 
 def _label(entry):
@@ -86,7 +90,7 @@ def _label(entry):
     crit = entry.get("criteria")
     if isinstance(crit, list):
         crit = crit[0] if crit else None
-    return str(who or crit or "cargo-vet")[:40]
+    return str(who or crit or "cargo-vet").replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')[:40]
 
 
 def main():
@@ -94,10 +98,7 @@ def main():
         return 0
     path = sys.argv[1]
     try:
-        try:
-            data = _load_tomllib(path)
-        except ImportError:
-            data = _minimal_parse(path)
+        data = _load_tomllib(path)
     except FileNotFoundError:
         return 0
 
@@ -105,12 +106,7 @@ def main():
     for crate, entries in audits.items():
         if isinstance(entries, dict):
             entries = [entries]
-        for e in (entries or []):
-            if not isinstance(e, dict):
-                continue
-            ver = _target_version(e)
-            if not ver:
-                continue
+        for ver, e in certified_versions(entries or [], data.get('criteria') or {}).items():
             print("REVIEW\t%s\t%s\tALL\tvet:%s" % (crate, ver, _label(e)))
     return 0
 

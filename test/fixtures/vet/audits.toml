@@ -6,6 +6,11 @@ criteria = "safe-to-deploy"
 who = "Alice <alice@example.com>"
 
 [[audits.somecrate]]
+version = "1.0.0"
+criteria = ["safe-to-run"]
+who = "Bob <bob@example.com>"
+
+[[audits.somecrate]]
 delta = "1.0.0 -> 1.0.1"
 criteria = ["safe-to-run"]
 who = "Bob <bob@example.com>"

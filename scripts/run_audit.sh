@@ -194,6 +194,8 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   : > "$CDIR/advisory.filtered"
   : > "$CDIR/provenance.filtered"
   : > "$CDIR/publish_age.txt"
+  printf 'disabled\n' > "$CDIR/advisory_status.txt"
+  printf 'disabled\n' > "$CDIR/provenance_status.txt"
   log "=== auditing $name : ${oldv:-<new>} -> $newv ==="
 
   OLD_RLIB=""; OLD_ERR=""
@@ -341,7 +343,11 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   [ -n "${RSA_FIXTURES:-}" ] && [ -d "${RSA_FIXTURES}/${name}-${newv}" ] && is_fixture=1
   PROV_TSV_F="$CDIR/provenance_findings.tsv"; : > "$PROV_TSV_F"; PROV_TIER="none"
   if [ "${RSA_CHECK_PROVENANCE:-1}" != "0" ] && { [ "$is_fixture" -eq 0 ] || [ -n "${RSA_CRATESIO_FIXTURE:-}" ]; }; then
-    "$HERE/provenance.sh" "$name" "${oldv:-}" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
+    "$HERE/provenance.sh" "$name" "${oldv:-}" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" \
+      || incomplete "$name $newv provenance check failed"
+    if [ "$(cat "$CDIR/provenance_status.txt")" != checked ]; then
+      incomplete "$name $newv requested provenance check unavailable"
+    fi
     apply_allow "$name" "$CDIR/provenance_findings.tsv" > "$CDIR/provenance.filtered" 2>/dev/null || true
     PROV_TSV_F="$CDIR/provenance.filtered"; PROV_TIER="$(max_tier "$PROV_TSV_F")"
   fi
@@ -349,7 +355,11 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   [ -s "$CDIR/publish_age.txt" ] && PUB_AGE="$(cat "$CDIR/publish_age.txt")"
   ADV_TSV_F="$CDIR/advisory_findings.tsv"; : > "$ADV_TSV_F"; ADV_TIER="none"
   if [ "${RSA_CHECK_ADVISORIES:-1}" != "0" ] && { [ "$is_fixture" -eq 0 ] || [ -n "${RSA_ADVISORY_FIXTURE:-}" ]; }; then
-    "$HERE/advisories.sh" "$name" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" || true
+    "$HERE/advisories.sh" "$name" "$newv" "$CDIR" >/dev/null 2>>"$CDIR/build.log" \
+      || incomplete "$name $newv advisory check failed"
+    if [ "$(cat "$CDIR/advisory_status.txt")" != checked ]; then
+      incomplete "$name $newv requested advisory check unavailable"
+    fi
     apply_allow "$name" "$CDIR/advisory_findings.tsv" > "$CDIR/advisory.filtered" 2>/dev/null || true
     ADV_TSV_F="$CDIR/advisory.filtered"; ADV_TIER="$(max_tier "$ADV_TSV_F")"
     ADVISORY_COUNT=$((ADVISORY_COUNT + $(count_lines "$ADV_TSV_F")))

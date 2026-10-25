@@ -182,6 +182,83 @@ class PipelineTests(unittest.TestCase):
         body = (self.work / 'run/comment_body.md').read_text(encoding='utf-8')
         self.assertNotIn('4 minutes ago', body)
 
+    def test_malformed_advisory_response_requires_review(self):
+        fixture = self.work / 'osv'
+        fixture.mkdir()
+        (fixture / 'netcap-0.1.0.json').write_text('{broken')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CHECK_ADVISORIES='1',
+                            RSA_ADVISORY_FIXTURE=fixture.as_posix())
+        self.assertEqual(report['recommendation'], 'review')
+        self.assertFalse(report['complete'])
+
+    def test_registry_error_response_is_not_a_missing_version(self):
+        fixture = self.work / 'registry'
+        fixture.mkdir()
+        (fixture / 'netcap.json').write_text('{"errors":[{"detail":"server error"}]}')
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CHECK_PROVENANCE='1',
+                            RSA_CRATESIO_FIXTURE=fixture.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertFalse(report['complete'])
+
+    def test_withdrawn_advisories_are_not_findings(self):
+        fixture = self.work / 'osv'
+        fixture.mkdir()
+        (fixture / 'netcap-0.1.0.json').write_text(json.dumps({'vulns': [
+            {'id': 'RUSTSEC-2099-0001', 'withdrawn': '2025-01-01T00:00:00Z'}]}))
+        report = self.audit('netcap\t0.1.0\t0.1.0\n', RSA_CHECK_ADVISORIES='1',
+                            RSA_ADVISORY_FIXTURE=fixture.as_posix())
+        self.assertEqual(report['overall_tier'], 'none')
+        self.assertEqual(report['crates'][0]['advisories'], [])
+
+    def test_review_cli_escapes_user_text(self):
+        import tomllib
+        ledger = self.work / 'reviews.toml'
+        who = 'Alice "Reviewer"'
+        notes = 'Windows path C:\\tools\nSecond line with "quotes"'
+        self.bash(ROOT / 'scripts/review.sh', 'netcap', '0.2.0', who, notes,
+                  env={'REVIEWS': ledger.as_posix()})
+        review = tomllib.loads(ledger.read_text(encoding='utf-8'))['review'][0]
+        self.assertEqual(review['reviewed_by'], who)
+        self.assertEqual(review['notes'], notes)
+
+    def test_review_cli_upgrades_partial_signoff(self):
+        import tomllib
+        ledger = self.work / 'reviews.toml'
+        ledger.write_text('[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = ["TcpStream"]\n')
+        self.bash(ROOT / 'scripts/review.sh', 'netcap', '0.2.0',
+                  env={'REVIEWS': ledger.as_posix()})
+        reviews = tomllib.loads(ledger.read_text(encoding='utf-8'))['review']
+        self.assertEqual(len(reviews), 2)
+        self.assertNotIn('accept', reviews[-1])
+
+    def test_review_cli_refuses_to_append_to_malformed_ledger(self):
+        ledger = self.work / 'reviews.toml'
+        text = '[[review]]\ncrate = "netcap"\nversion = "0.2.0"\naccept = [\n'
+        ledger.write_text(text)
+        result = self.bash(ROOT / 'scripts/review.sh', 'netcap', '0.2.0',
+                           env={'REVIEWS': ledger.as_posix()}, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(ledger.read_text(), text)
+
+    def test_sticky_post_uses_paginated_owned_comment_with_mock_gh(self):
+        shim = self.work / 'gh'
+        shim.write_text('''#!/usr/bin/env bash
+if [ "$1 $2" = "api user" ]; then echo 'github-actions[bot]'; exit 0; fi
+if [ "$2" = "repos/example/test/issues/7/comments" ]; then
+  [ "$3 $4" = "--paginate --slurp" ] || exit 9
+  printf '%s\\n' '[[{"id":10,"body":"<!-- rust-symbol-audit -->","user":{"login":"github-actions[bot]"}}],[{"id":30,"body":"<!-- rust-symbol-audit -->","user":{"login":"github-actions[bot]"}},{"id":40,"body":"<!-- rust-symbol-audit -->","user":{"login":"someone-else"}}]]'
+  exit 0
+fi
+if [ "$2 $3" = "--method PATCH" ]; then printf '%s' "$4" > "$WORK/patched.txt"; exit 0; fi
+exit 9
+''', encoding='utf-8', newline='\n')
+        shim.chmod(0o755)
+        self.bash('-c', 'dir="$1"; command -v cygpath >/dev/null && dir="$(cygpath -u "$dir")"; export PATH="$dir:$PATH"; test "$(command -v gh)" = "$dir/gh" || exit 5; bash "$2"',
+                  'test', self.work.as_posix(), (ROOT / 'scripts/post_comment.sh').as_posix(),
+                  env={'WORK': self.work.as_posix(), 'GITHUB_REPOSITORY': 'example/test',
+                       'PR_NUMBER': '7', 'RSA_DRY_RUN': '0', 'RSA_COMMENT': 'true'})
+        self.assertEqual((self.work / 'patched.txt').read_text(), 'repos/example/test/issues/comments/30')
+
     def test_failed_symbol_tool_never_recommends_auto_merge(self):
         report = self.audit('netcap\t0.1.0\t0.1.0\n', NM='false')
         self.assertEqual(report['recommendation'], 'review')

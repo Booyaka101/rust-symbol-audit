@@ -94,9 +94,13 @@ fi
 REPO="${GITHUB_REPOSITORY:-}"
 existing_id=""
 if [ -n "$REPO" ]; then
-  # Find the newest comment authored earlier by this action (carries the marker).
+  # Integration tokens may not access /user. The built-in Actions token posts
+  # as github-actions[bot]; a PAT may post as its own authenticated account.
+  author="$(gh api user --jq .login 2>/dev/null || printf 'github-actions[bot]')"
+  # Slurp pages before selecting one ID. Per-page jq would yield multiple IDs,
+  # and matching the marker alone could target someone else's copied report.
   existing_id="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
-      --jq "map(select(.body | contains(\"$RSA_MARKER\"))) | last | .id" 2>/dev/null || true)"
+      --slurp 2>/dev/null | python3 "$HERE/find_comment.py" "$author" "$RSA_MARKER" 2>/dev/null || true)"
   [ "$existing_id" = "null" ] && existing_id=""
 fi
 

@@ -82,7 +82,7 @@ if [ ! -f "$META" ]; then
   elif [ "${RSA_CHECK_PROVENANCE:-1}" = "1" ] && command -v curl >/dev/null 2>&1; then
     fetched="$(find "$CACHE" -maxdepth 1 -name '*.json' 2>/dev/null | awk 'END{print NR+0}')"
     if [ "$fetched" -lt "${RSA_DEPMETA_MAX:-25}" ]; then
-      curl -sS -m 20 -A "rust-symbol-audit (github action)" \
+      curl -fsS -m 20 -A "rust-symbol-audit (github action)" \
         "https://crates.io/api/v1/crates/${DEP}" -o "$META" 2>/dev/null || rm -f "$META"
       [ -s "$META" ] || rm -f "$META"
     else
@@ -93,13 +93,14 @@ fi
 
 # AGE_SECS \t DOWNLOADS \t AGE_STR, any field "unknown" when unavailable.
 read -r AGE_SECS DOWNLOADS HAS_REPO AGE_STR <<EOF2
-$(PYTHONPATH="$HERE" python3 - "$META" <<'PY'
+$(PYTHONPATH="$HERE" python3 - "$META" "$DEP" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
 from agefmt import rel_age
+from registry_data import cratesio
 try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
+    data = cratesio(sys.argv[1], sys.argv[2], versions=False)
+except (OSError, ValueError):
     data = {}
 c = data.get("crate") or {}
 secs = None

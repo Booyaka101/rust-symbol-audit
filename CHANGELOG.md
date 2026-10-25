@@ -16,6 +16,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   review, with diagnostics saved in the audit work directory's `config.log`.
 - Reusing an audit work directory no longer carries disabled advisory or
   provenance findings, or old publish ages, into the current evidence report.
+- Cargo-vet imports require safety criteria and a full audit root for delta
+  chains. License-only audits and unrooted deltas no longer approve a version;
+  crates with violation entries are conservatively excluded from import.
+- Malformed registry responses and HTTP errors are no longer treated as clean
+  advisory checks or proof of registry removal. Enabled but unavailable checks
+  require review without inventing a risk tier. Withdrawn OSV advisories are
+  ignored. Per-crate JSON now includes explicit registry-check status.
+- Sticky comments select one newest comment across all pages and verify its
+  author, rather than matching reports copied by other users.
+- The review helper escapes quotes, backslashes and multiline notes, refuses
+  malformed ledgers, and distinguishes partial from whole-version sign-offs.
 
 ## [3.6.0] - 2026-10-24
 
